@@ -127,14 +127,13 @@ class ToolManager:
         self.log = log
         self.system = platform.system()
         self.machine = normalized_machine()
-        self.base = TOOLS_DIR / f"{self.system.lower()}-{self.machine}"
 
     def path(self, tool: str) -> Path:
         if tool == "scrcpy" and self.system == "Linux":
             installed = shutil.which("scrcpy")
             if installed:
                 return Path(installed)
-        return self.base / executable_name(tool)
+        return TOOLS_DIR / executable_name(tool)
 
     def download(self, url: str, target: Path):
         self.log(f"Downloading: {url}")
@@ -155,14 +154,14 @@ class ToolManager:
             path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
     def install_platform_tools(self):
-        archive = self.base / "platform-tools.zip"
+        archive = TOOLS_DIR / "platform-tools.zip"
         self.download(PLATFORM_TOOLS[self.system], archive)
         with zipfile.ZipFile(archive) as zf:
             member = next(n for n in zf.namelist() if n.endswith("/" + executable_name("adb")))
             prefix = member.rsplit("/", 1)[0] + "/"
             for name in zf.namelist():
                 if name.startswith(prefix) and not name.endswith("/"):
-                    destination = self.base / Path(name).name
+                    destination = TOOLS_DIR / Path(name).name
                     with zf.open(name) as src, destination.open("wb") as dst:
                         shutil.copyfileobj(src, dst)
         archive.unlink(missing_ok=True)
@@ -175,7 +174,7 @@ class ToolManager:
             raise RuntimeError(f"Unsupported platform: {self.system} {self.machine}") from exc
         target = self.path("cloudflared")
         if url.endswith(".tgz"):
-            archive = self.base / "cloudflared.tgz"
+            archive = TOOLS_DIR / "cloudflared.tgz"
             self.download(url, archive)
             with tarfile.open(archive, "r:gz") as tf:
                 binary = next(m for m in tf.getmembers() if Path(m.name).name == "cloudflared")
@@ -198,7 +197,7 @@ class ToolManager:
         asset = next((a for a in assets if marker in a["name"].lower() and a["name"].endswith((".zip", ".tar.gz"))), None)
         if not asset:
             raise RuntimeError(f"Could not find a {marker} asset in the latest scrcpy release.")
-        archive = self.base / asset["name"]
+        archive = TOOLS_DIR / asset["name"]
         self.download(asset["browser_download_url"], archive)
         if archive.suffix == ".zip":
             with zipfile.ZipFile(archive) as zf:
@@ -206,21 +205,21 @@ class ToolManager:
                 prefix = binary.rsplit("/", 1)[0] + "/"
                 for name in zf.namelist():
                     if name.startswith(prefix) and not name.endswith("/"):
-                        with zf.open(name) as src, (self.base / Path(name).name).open("wb") as dst:
+                        with zf.open(name) as src, (TOOLS_DIR / Path(name).name).open("wb") as dst:
                             shutil.copyfileobj(src, dst)
         else:
             with tarfile.open(archive, "r:gz") as tf:
                 prefix = next(m.name.rsplit("/", 1)[0] + "/" for m in tf.getmembers() if Path(m.name).name == "scrcpy")
                 for member in tf.getmembers():
                     if member.isfile() and member.name.startswith(prefix):
-                        with tf.extractfile(member) as src, (self.base / Path(member.name).name).open("wb") as dst:
+                        with tf.extractfile(member) as src, (TOOLS_DIR / Path(member.name).name).open("wb") as dst:
                             assert src is not None
                             shutil.copyfileobj(src, dst)
         archive.unlink(missing_ok=True)
         self.make_executable(self.path("scrcpy"))
 
     def ensure(self):
-        self.base.mkdir(parents=True, exist_ok=True)
+        TOOLS_DIR.mkdir(parents=True, exist_ok=True)
         if not self.path("cloudflared").exists(): self.install_cloudflared()
         if not self.path("adb").exists(): self.install_platform_tools()
         if not self.path("scrcpy").exists(): self.install_scrcpy()
