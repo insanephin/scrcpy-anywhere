@@ -1,0 +1,13 @@
+services:
+  android-1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: android-1
+    privileged: true
+    devices:
+      - /dev/kvm:/dev/
+    network_mode: host
+    ports:
+      - "5555:5555"
+    restart: unless-stopped

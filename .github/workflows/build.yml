@@ -1,0 +1,63 @@
+name: Build connector
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "connector.py"
+      - ".github/workflows/build.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "connector.py"
+      - ".github/workflows/build.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            name: Windows
+            artifact_name: scrcpy-anywhere-windows
+          - os: ubuntu-latest
+            name: Linux
+            artifact_name: scrcpy-anywhere-linux
+          - os: macos-latest
+            name: macOS
+            artifact_name: scrcpy-anywhere-macos
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install PyInstaller
+        run: python -m pip install --upgrade pip pyinstaller
+
+      - name: Check source syntax
+        run: python -m py_compile connector.py
+
+      - name: Build one-file application
+        run: >
+          pyinstaller --noconfirm --clean --onefile --windowed
+          --name scrcpy-anywhere connector.py
+
+      - name: Upload executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: dist/scrcpy-anywhere*
+          if-no-files-found: error
+          retention-days: 14
