@@ -72,5 +72,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG_NAME: ${{ github.ref_name }}
         run: >
-          gh release create "$TAG_NAME" release-assets/*/*
+          gh release create "$TAG_NAME" release-assets/*/* --repo "${{ github.repository }}"
           --title "$TAG_NAME" --generate-notes
