@@ -7,6 +7,7 @@ import shutil
 import signal
 import stat
 import subprocess
+import sys
 import tarfile
 import threading
 import time
@@ -22,7 +23,19 @@ from tkinter import messagebox
 APP_NAME = "cloudflared adb scrcpy quick-connect"
 APP_DIR = Path(__file__).resolve().parent
 CONFIG_PATH = Path.home() / "adb-cloud-dashboard.json"
-TOOLS_DIR = APP_DIR / "tools"
+
+
+def application_dir() -> Path:
+    if getattr(sys, "frozen", False) or hasattr(sys, "_MEIPASS"):
+        return Path(sys.executable).resolve().parent
+    return APP_DIR
+
+
+def tool_storage_dir() -> Path:
+    return application_dir() / "tools"
+
+
+TOOLS_DIR = tool_storage_dir()
 GITHUB_RELEASE = "https://api.github.com/repos/Genymobile/scrcpy/releases/latest"
 PLATFORM_TOOLS = {
     "Windows": "https://dl.google.com/android/repository/platform-tools-latest-windows.zip",

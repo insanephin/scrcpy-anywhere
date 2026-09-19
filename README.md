@@ -63,7 +63,7 @@ python connector.py
 1. Enter the Cloudflare Access TCP application hostname in **Access hostname**.
 2. Leave **Local port** at its default value, `5555`.
 3. Click **Connect**.
-4. On first use, the application downloads the required tools and may open a Cloudflare Access sign-in flow.
+4. On first use, the application downloads the required tools and may open a Cloudflare Access sign-in flow. The tools are stored in a `tools` folder next to the launched application (for example, next to `scrcpy-anywhere.exe`), so they persist across launches.
 
 To end the session, click **Disconnect** or close the application. The most recently used hostname and port are saved to `adb-cloud-dashboard.json` in the user's home directory.
 

@@ -61,7 +61,7 @@ python connector.py
 1. **Access hostname**에 Cloudflare Access TCP 애플리케이션 hostname을 입력합니다.
 2. **Local port**는 기본값 `5555`를 사용합니다.
 3. **Connect**를 누릅니다.
-4. 최초 실행 시 필요한 도구 다운로드 및 Cloudflare Access 로그인이 진행될 수 있습니다.
+4. 최초 실행 시 필요한 도구 다운로드 및 Cloudflare Access 로그인이 진행될 수 있습니다. 내려받은 도구는 실행한 애플리케이션(예: `scrcpy-anywhere.exe`)과 같은 폴더의 `tools`에 저장됩니다.
 
 연결을 종료하려면 앱에서 **Disconnect**를 누르거나 창을 닫습니다. 마지막 hostname과 포트는 사용자 홈 디렉터리의 `adb-cloud-dashboard.json`에 저장됩니다.
 
