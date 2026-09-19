@@ -20,12 +20,15 @@ jobs:
           - os: windows-latest
             name: Windows
             artifact_name: scrcpy-anywhere-windows
+            asset_path: dist/scrcpy-anywhere.exe
           - os: ubuntu-latest
             name: Linux
             artifact_name: scrcpy-anywhere-linux
+            asset_path: dist/scrcpy-anywhere
           - os: macos-latest
             name: macOS
             artifact_name: scrcpy-anywhere-macos
+            asset_path: dist/scrcpy-anywhere-macos.zip
 
     steps:
       - name: Check out repository
@@ -47,11 +50,17 @@ jobs:
           pyinstaller --noconfirm --clean --onefile --windowed
           --name scrcpy-anywhere connector.py
 
+      - name: Package macOS application bundle
+        if: matrix.os == 'macos-latest'
+        run: >
+          ditto -c -k --sequesterRsrc --keepParent
+          dist/scrcpy-anywhere.app dist/scrcpy-anywhere-macos.zip
+
       - name: Upload release asset
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}
-          path: dist/scrcpy-anywhere*
+          path: ${{ matrix.asset_path }}
           if-no-files-found: error
 
   release:
@@ -67,10 +76,13 @@ jobs:
           path: release-assets
           merge-multiple: false
 
-      - name: Create release and upload assets
+      - name: Create release or replace its assets
         env:
           GH_TOKEN: ${{ github.token }}
           TAG_NAME: ${{ github.ref_name }}
-        run: >
-          gh release create "$TAG_NAME" release-assets/*/* --repo "${{ github.repository }}"
-          --title "$TAG_NAME" --generate-notes
+        run: |
+          if gh release view "$TAG_NAME" > /dev/null 2>&1; then
+            gh release upload "$TAG_NAME" release-assets/*/* --clobber
+          else
+            gh release create "$TAG_NAME" release-assets/*/* --title "$TAG_NAME" --generate-notes
+          fi

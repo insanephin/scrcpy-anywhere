@@ -27,12 +27,15 @@ jobs:
           - os: windows-latest
             name: Windows
             artifact_name: scrcpy-anywhere-windows
+            asset_path: dist/scrcpy-anywhere.exe
           - os: ubuntu-latest
             name: Linux
             artifact_name: scrcpy-anywhere-linux
+            asset_path: dist/scrcpy-anywhere
           - os: macos-latest
             name: macOS
             artifact_name: scrcpy-anywhere-macos
+            asset_path: dist/scrcpy-anywhere-macos.zip
 
     steps:
       - name: Check out repository
@@ -54,10 +57,16 @@ jobs:
           pyinstaller --noconfirm --clean --onefile --windowed
           --name scrcpy-anywhere connector.py
 
+      - name: Package macOS application bundle
+        if: matrix.os == 'macos-latest'
+        run: >
+          ditto -c -k --sequesterRsrc --keepParent
+          dist/scrcpy-anywhere.app dist/scrcpy-anywhere-macos.zip
+
       - name: Upload executable
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}
-          path: dist/scrcpy-anywhere*
+          path: ${{ matrix.asset_path }}
           if-no-files-found: error
           retention-days: 14
