@@ -39,11 +39,11 @@ RUN sdkmanager \
     "platform-tools" \
     "emulator" \
     "platforms;android-36" \
-    "system-images;android-36;google_play;x86_64"
+    "system-images;android-36;google_apis_playstore;x86_64"
 
 RUN echo "no" | avdmanager create avd \
     -n pixel \
-    -k "system-images;android-36;google_play;x86_64" \
+    -k "system-images;android-36;google_apis_playstore;x86_64" \
     --force
 
 COPY entrypoint.sh /entrypoint.sh
