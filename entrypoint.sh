@@ -7,7 +7,7 @@ emulator \
     -no-window \
     -no-audio \
     -no-boot-anim \
-    -gpu swiftshader_indirect \
+    -gpu host \
     -port 5554 \
     &
 
@@ -19,9 +19,9 @@ until adb devices | grep -q "emulator-5554.*device"; do
     sleep 2
     echo "Waiting for Android..."
 done
-echo "Android emulator is ready."
 
-adb -s emulator-5554 tcpip 5555
-echo "adb TCP/IP enabled on port 5555."
+if adb shell getprop sys.boot_completed | grep -q 1; then
+    echo "Android emulator is fully booted."
+fi
 
 wait $EMULATOR_PID

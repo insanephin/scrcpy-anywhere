@@ -39,19 +39,12 @@ RUN sdkmanager \
     "platform-tools" \
     "emulator" \
     "platforms;android-36" \
-    "system-images;android-36;google_apis;x86_64"
+    "system-images;android-36;google_play;x86_64"
 
 RUN echo "no" | avdmanager create avd \
     -n pixel \
-    -k "system-images;android-36;google_apis;x86_64" \
+    -k "system-images;android-36;google_play;x86_64" \
     --force
-
-# CMD ["emulator", "-avd", "pixel", \
-#      "-no-window", \
-#      "-no-audio", \
-#      "-no-boot-anim", \
-#      "-gpu", "swiftshader_indirect", \
-#      "-port", "5554"]
 
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
