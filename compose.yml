@@ -6,7 +6,6 @@ services:
     container_name: android-1
     devices:
       - /dev/kvm:/dev/kvm
-      - /dev/dri:/dev/dri
     ports:
       - "5555:5555"
     restart: unless-stopped
@@ -18,7 +17,6 @@ services:
     container_name: android-2
     devices:
       - /dev/kvm:/dev/kvm
-      - /dev/dri:/dev/dri
     ports:
       - "5556:5555"
     restart: unless-stopped
