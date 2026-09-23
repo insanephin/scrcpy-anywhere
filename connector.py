@@ -96,9 +96,9 @@ class ProcessSupervisor:
             import ctypes
             ctypes.CDLL(None).prctl(1, signal.SIGTERM)
 
-    def spawn(self, command: list[str]) -> subprocess.Popen:
+    def spawn(self, command: list[str], env: dict[str, str] | None = None) -> subprocess.Popen:
         options = dict(stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                       encoding="utf-8", errors="replace")
+                       encoding="utf-8", errors="replace", env=env)
         if platform.system() == "Windows":
             options["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
         elif platform.system() == "Linux":
@@ -140,13 +140,6 @@ class ToolManager:
             if installed:
                 return Path(installed)
         return self.storage_dir / executable_name(tool)
-
-    def adb_environment(self) -> dict[str, str]:
-        environment = os.environ.copy()
-        private_key = self.storage_dir / "adbkey"
-        if private_key.exists():
-            environment["ADB_VENDOR_KEYS"] = str(private_key)
-        return environment
 
     def download(self, url: str, target: Path):
         self.log(f"Downloading: {url}")
@@ -373,33 +366,40 @@ class Dashboard:
         self.tunnel = self.supervisor.spawn(command)
         threading.Thread(target=self.pipe_output, args=(self.tunnel, "cloudflared"), daemon=True).start()
         adb = str(self.tools.path("adb"))
-        target = f"127.0.0.1:{port}"
-        self.prepare_adb_server(adb)
-        self.wait_for_adb_device(adb, target)
-        self.log(f"adb connected: {target}. Starting scrcpy...")
-        self._launch_scrcpy(target)
-        self.events.put(("status", f"Connected and running scrcpy: {target}"))
+        serial = self.wait_for_adb_device(adb, port)
+        self.log(f"Remote adb device ready: {serial}. Starting scrcpy...")
+        self._launch_scrcpy(serial, port)
+        self.events.put(("status", f"Connected and running scrcpy: {serial}"))
 
-    def prepare_adb_server(self, adb: str):
-        """Restart ADB so it loads a deployed ADB_VENDOR_KEYS private key."""
-        environment = self.tools.adb_environment()
-        self.run_and_log([adb, "kill-server"], env=environment)
-        self.run_and_log([adb, "start-server"], env=environment)
+    @staticmethod
+    def remote_adb_command(adb: str, port: int, *arguments: str) -> list[str]:
+        return [adb, "-H", "127.0.0.1", "-P", str(port), *arguments]
 
-    def wait_for_adb_device(self, adb: str, target: str, timeout: int = 60):
+    @staticmethod
+    def remote_adb_environment(port: int) -> dict[str, str]:
+        environment = os.environ.copy()
+        environment.pop("ADB_VENDOR_KEYS", None)
+        environment["ADB_SERVER_SOCKET"] = f"tcp:127.0.0.1:{port}"
+        return environment
+
+    def wait_for_adb_device(self, adb: str, port: int, timeout: int = 60) -> str:
         """Allow time for the Access login and TCP listener to become ready."""
+        deadline = time.monotonic() + timeout
         last_error = ""
-        for attempt in range(3):
+        attempts = 0
+        while time.monotonic() < deadline and attempts < 3:
             if self.tunnel is None or self.tunnel.poll() is not None:
                 raise RuntimeError("cloudflared exited before the adb tunnel became ready. Check the log.")
             try:
-                self.run_and_log([adb, "connect", target], env=self.tools.adb_environment())
-                devices = self.run_and_log([adb, "devices"], env=self.tools.adb_environment())
-                if any(line.split("\t", 1) == [target, "device"] for line in devices.splitlines()):
-                    return
+                devices = self.run_and_log(self.remote_adb_command(adb, port, "devices", "-l"))
+                for line in devices.splitlines():
+                    fields = line.split()
+                    if len(fields) >= 2 and fields[1] == "device":
+                        return fields[0]
             except RuntimeError as exc:
                 last_error = str(exc)
-            if attempt < 2:
+            attempts += 1
+            if attempts < 3:
                 self.events.put(("status", "Waiting for Cloudflare Access authentication..."))
                 time.sleep(2)
         suffix = f" Last adb error: {last_error}" if last_error else ""
@@ -413,11 +413,11 @@ class Dashboard:
         if completed.returncode: raise RuntimeError(f"Command failed ({completed.returncode}): {' '.join(command)}")
         return output
 
-    def _launch_scrcpy(self, target: str):
+    def _launch_scrcpy(self, serial: str, port: int):
         self.supervisor.stop(self.scrcpy)
-        command = [str(self.tools.path("scrcpy")), "-s", target]
+        command = [str(self.tools.path("scrcpy")), "-s", serial]
         self.log("Running: " + " ".join(command))
-        self.scrcpy = self.supervisor.spawn(command)
+        self.scrcpy = self.supervisor.spawn(command, env=self.remote_adb_environment(port))
         threading.Thread(target=self.pipe_output, args=(self.scrcpy, "scrcpy"), daemon=True).start()
         self.events.put(("status", "scrcpy is running"))
 
@@ -428,9 +428,6 @@ class Dashboard:
     def _disconnect(self, port_text: str):
         port = int(port_text)
         self.supervisor.stop(self.scrcpy)
-        if self.tools.path("adb").exists():
-            try: self.run_and_log([str(self.tools.path("adb")), "disconnect", f"127.0.0.1:{port}"], env=self.tools.adb_environment())
-            except RuntimeError: pass
         self.supervisor.stop(self.tunnel)
         self.tunnel = self.scrcpy = None
         self.events.put(("status", "Disconnected"))
