@@ -36,6 +36,10 @@ def tool_storage_dir() -> Path:
     return application_dir() / "tools"
 
 
+def log_file_path() -> Path:
+    return application_dir() / "logs" / "connector.log"
+
+
 TOOLS_DIR = tool_storage_dir()
 GITHUB_RELEASE = "https://api.github.com/repos/Genymobile/scrcpy/releases/latest"
 PLATFORM_TOOLS = {
@@ -294,7 +298,15 @@ class Dashboard:
         self.log("Tool location: " + str(self.tools.storage_dir))
 
     def log(self, message: str):
-        self.events.put(("log", f"[{time.strftime('%H:%M:%S')}] {message}\n"))
+        line = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {message}\n"
+        try:
+            path = log_file_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as logfile:
+                logfile.write(line)
+        except OSError:
+            pass
+        self.events.put(("log", line))
 
     def consume_events(self):
         while not self.events.empty():
@@ -376,9 +388,8 @@ class Dashboard:
 
     def wait_for_adb_device(self, adb: str, target: str, timeout: int = 60):
         """Allow time for the Access login and TCP listener to become ready."""
-        deadline = time.monotonic() + timeout
         last_error = ""
-        while time.monotonic() < deadline:
+        for attempt in range(3):
             if self.tunnel is None or self.tunnel.poll() is not None:
                 raise RuntimeError("cloudflared exited before the adb tunnel became ready. Check the log.")
             try:
@@ -388,10 +399,11 @@ class Dashboard:
                     return
             except RuntimeError as exc:
                 last_error = str(exc)
-            self.events.put(("status", "Waiting for Cloudflare Access authentication..."))
-            time.sleep(2)
+            if attempt < 2:
+                self.events.put(("status", "Waiting for Cloudflare Access authentication..."))
+                time.sleep(2)
         suffix = f" Last adb error: {last_error}" if last_error else ""
-        raise RuntimeError("adb device was not found within 60 seconds. Check Access authentication and the cloudflared log." + suffix)
+        raise RuntimeError("adb device was not found after 3 attempts. Check Access authentication and the cloudflared log." + suffix)
 
     def run_and_log(self, command: list[str], env: dict[str, str] | None = None) -> str:
         self.log("Running: " + " ".join(command))
