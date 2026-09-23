@@ -7,7 +7,7 @@ services:
     devices:
       - /dev/kvm:/dev/kvm
     ports:
-      - "5555:5555"
+      - "127.0.0.1:5555:5555"
     restart: unless-stopped
 
   android-2:
@@ -18,5 +18,5 @@ services:
     devices:
       - /dev/kvm:/dev/kvm
     ports:
-      - "5556:5555"
+      - "127.0.0.1:5556:5555"
     restart: unless-stopped

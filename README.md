@@ -49,8 +49,9 @@ Once the container has started, ADB TCP is enabled on port `5555` for the emulat
 
 </details>
 
-> [!IMPORTANT]
-> The current Compose configuration uses Linux host networking. Docker Desktop on Windows and macOS is not supported.
+The Compose configuration publishes emulator 1 at `127.0.0.1:5555` and emulator 2 at `127.0.0.1:5556`. The loopback-only binding prevents bypassing Cloudflare Access from another machine. A Linux host with `/dev/kvm` is required; Docker Desktop on Windows and macOS is not supported.
+
+ADB authentication is still active. Copy the matching server-side ADB private key to `tools/adbkey` on the client using a secure channel before connecting. Never commit or share that private key publicly.
 
 ## Connect from a client
 
@@ -71,7 +72,7 @@ To end the session, click **Disconnect** or close the application. The most rece
 
 - ADB grants device-control privileges; do not expose it directly to the internet.
 - Configure Cloudflare Access policies so only authorized users can reach the TCP application.
-- The container uses privileged mode to access KVM. Run it only on a trusted Linux host.
+- The container maps `/dev/kvm` for emulator acceleration. Run it only on a trusted Linux host.
 - This project downloads an Android Emulator image and external tools such as `scrcpy` and `cloudflared`. Review their licenses and distribution policies.
 
 ## License

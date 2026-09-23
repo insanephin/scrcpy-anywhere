@@ -44,9 +44,9 @@ docker compose up --build -d
 - **URL**: `localhost:5555` (ADB 기본 포트)
 </details>
 
-> [!IMPORTANT]
-> 현재 Compose 설정은 Linux의 host networking을 사용합니다.
-> 따라서 Windows 및 macOS용 Docker Desktop 환경은 지원 대상이 아닙니다.
+Compose 설정은 에뮬레이터 1을 `127.0.0.1:5555`, 에뮬레이터 2를 `127.0.0.1:5556`에 공개합니다. 로컬 루프백으로만 바인딩하여 다른 장비가 Cloudflare Access를 우회하지 못하게 합니다. `/dev/kvm`을 사용할 수 있는 Linux 호스트가 필요하며 Windows 및 macOS용 Docker Desktop은 지원 대상이 아닙니다.
+
+ADB 자체 인증도 계속 사용합니다. 연결 전에 서버의 해당 ADB 개인 키를 안전한 방법으로 클라이언트의 `tools/adbkey`에 복사해야 합니다. 이 개인 키를 Git에 올리거나 공개해서는 안 됩니다.
 
 ## 클라이언트 연결
 
@@ -69,7 +69,7 @@ python connector.py
 
 - ADB는 기기 제어 권한을 제공하므로 인터넷에 평문으로 직접 노출하면 안 됩니다.
 - Cloudflare Access 정책에서 허용된 사용자만 TCP 애플리케이션에 접근하도록 설정하세요.
-- 현재 컨테이너는 KVM 접근을 위해 privileged mode를 사용합니다. 신뢰하는 Linux 호스트에서만 실행하세요.
+- 현재 컨테이너는 가속을 위해 `/dev/kvm`을 매핑합니다. 신뢰하는 Linux 호스트에서만 실행하세요.
 - 이 프로젝트는 Android Emulator 이미지와 `scrcpy`, `cloudflared` 등 외부 도구를 내려받습니다. 각 도구의 라이선스와 배포 정책을 확인하세요.
 
 ## 라이선스
