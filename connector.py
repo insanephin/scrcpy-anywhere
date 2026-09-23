@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import platform
 import queue
 import shutil
@@ -127,13 +128,21 @@ class ToolManager:
         self.log = log
         self.system = platform.system()
         self.machine = normalized_machine()
+        self.storage_dir = TOOLS_DIR
 
     def path(self, tool: str) -> Path:
         if tool == "scrcpy" and self.system == "Linux":
             installed = shutil.which("scrcpy")
             if installed:
                 return Path(installed)
-        return TOOLS_DIR / executable_name(tool)
+        return self.storage_dir / executable_name(tool)
+
+    def adb_environment(self) -> dict[str, str]:
+        environment = os.environ.copy()
+        private_key = self.storage_dir / "adbkey"
+        if private_key.exists():
+            environment["ADB_VENDOR_KEYS"] = str(private_key)
+        return environment
 
     def download(self, url: str, target: Path):
         self.log(f"Downloading: {url}")
@@ -154,14 +163,14 @@ class ToolManager:
             path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
     def install_platform_tools(self):
-        archive = TOOLS_DIR / "platform-tools.zip"
+        archive = self.storage_dir / "platform-tools.zip"
         self.download(PLATFORM_TOOLS[self.system], archive)
         with zipfile.ZipFile(archive) as zf:
             member = next(n for n in zf.namelist() if n.endswith("/" + executable_name("adb")))
             prefix = member.rsplit("/", 1)[0] + "/"
             for name in zf.namelist():
                 if name.startswith(prefix) and not name.endswith("/"):
-                    destination = TOOLS_DIR / Path(name).name
+                    destination = self.storage_dir / Path(name).name
                     with zf.open(name) as src, destination.open("wb") as dst:
                         shutil.copyfileobj(src, dst)
         archive.unlink(missing_ok=True)
@@ -174,7 +183,7 @@ class ToolManager:
             raise RuntimeError(f"Unsupported platform: {self.system} {self.machine}") from exc
         target = self.path("cloudflared")
         if url.endswith(".tgz"):
-            archive = TOOLS_DIR / "cloudflared.tgz"
+            archive = self.storage_dir / "cloudflared.tgz"
             self.download(url, archive)
             with tarfile.open(archive, "r:gz") as tf:
                 binary = next(m for m in tf.getmembers() if Path(m.name).name == "cloudflared")
@@ -197,7 +206,7 @@ class ToolManager:
         asset = next((a for a in assets if marker in a["name"].lower() and a["name"].endswith((".zip", ".tar.gz"))), None)
         if not asset:
             raise RuntimeError(f"Could not find a {marker} asset in the latest scrcpy release.")
-        archive = TOOLS_DIR / asset["name"]
+        archive = self.storage_dir / asset["name"]
         self.download(asset["browser_download_url"], archive)
         if archive.suffix == ".zip":
             with zipfile.ZipFile(archive) as zf:
@@ -205,21 +214,21 @@ class ToolManager:
                 prefix = binary.rsplit("/", 1)[0] + "/"
                 for name in zf.namelist():
                     if name.startswith(prefix) and not name.endswith("/"):
-                        with zf.open(name) as src, (TOOLS_DIR / Path(name).name).open("wb") as dst:
+                        with zf.open(name) as src, (self.storage_dir / Path(name).name).open("wb") as dst:
                             shutil.copyfileobj(src, dst)
         else:
             with tarfile.open(archive, "r:gz") as tf:
                 prefix = next(m.name.rsplit("/", 1)[0] + "/" for m in tf.getmembers() if Path(m.name).name == "scrcpy")
                 for member in tf.getmembers():
                     if member.isfile() and member.name.startswith(prefix):
-                        with tf.extractfile(member) as src, (TOOLS_DIR / Path(member.name).name).open("wb") as dst:
+                        with tf.extractfile(member) as src, (self.storage_dir / Path(member.name).name).open("wb") as dst:
                             assert src is not None
                             shutil.copyfileobj(src, dst)
         archive.unlink(missing_ok=True)
         self.make_executable(self.path("scrcpy"))
 
     def ensure(self):
-        TOOLS_DIR.mkdir(parents=True, exist_ok=True)
+        self.storage_dir.mkdir(parents=True, exist_ok=True)
         if not self.path("cloudflared").exists(): self.install_cloudflared()
         if not self.path("adb").exists(): self.install_platform_tools()
         if not self.path("scrcpy").exists(): self.install_scrcpy()
@@ -282,7 +291,7 @@ class Dashboard:
         ttk.Label(frame, textvariable=self.status).pack(anchor="w")
         self.log_widget = ScrolledText(frame, height=18, state="disabled", font=("Consolas", 10))
         self.log_widget.pack(fill="both", expand=True, pady=(8, 0))
-        self.log("Tool location: " + str(self.tools.base))
+        self.log("Tool location: " + str(self.tools.storage_dir))
 
     def log(self, message: str):
         self.events.put(("log", f"[{time.strftime('%H:%M:%S')}] {message}\n"))
@@ -353,10 +362,17 @@ class Dashboard:
         threading.Thread(target=self.pipe_output, args=(self.tunnel, "cloudflared"), daemon=True).start()
         adb = str(self.tools.path("adb"))
         target = f"127.0.0.1:{port}"
+        self.prepare_adb_server(adb)
         self.wait_for_adb_device(adb, target)
         self.log(f"adb connected: {target}. Starting scrcpy...")
         self._launch_scrcpy(target)
         self.events.put(("status", f"Connected and running scrcpy: {target}"))
+
+    def prepare_adb_server(self, adb: str):
+        """Restart ADB so it loads a deployed ADB_VENDOR_KEYS private key."""
+        environment = self.tools.adb_environment()
+        self.run_and_log([adb, "kill-server"], env=environment)
+        self.run_and_log([adb, "start-server"], env=environment)
 
     def wait_for_adb_device(self, adb: str, target: str, timeout: int = 60):
         """Allow time for the Access login and TCP listener to become ready."""
@@ -366,8 +382,8 @@ class Dashboard:
             if self.tunnel is None or self.tunnel.poll() is not None:
                 raise RuntimeError("cloudflared exited before the adb tunnel became ready. Check the log.")
             try:
-                self.run_and_log([adb, "connect", target])
-                devices = self.run_and_log([adb, "devices"])
+                self.run_and_log([adb, "connect", target], env=self.tools.adb_environment())
+                devices = self.run_and_log([adb, "devices"], env=self.tools.adb_environment())
                 if any(line.split("\t", 1) == [target, "device"] for line in devices.splitlines()):
                     return
             except RuntimeError as exc:
@@ -377,9 +393,9 @@ class Dashboard:
         suffix = f" Last adb error: {last_error}" if last_error else ""
         raise RuntimeError("adb device was not found within 60 seconds. Check Access authentication and the cloudflared log." + suffix)
 
-    def run_and_log(self, command: list[str]) -> str:
+    def run_and_log(self, command: list[str], env: dict[str, str] | None = None) -> str:
         self.log("Running: " + " ".join(command))
-        completed = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30)
+        completed = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30, env=env)
         output = (completed.stdout + completed.stderr).strip()
         if output: self.log(output)
         if completed.returncode: raise RuntimeError(f"Command failed ({completed.returncode}): {' '.join(command)}")
@@ -401,7 +417,7 @@ class Dashboard:
         port = int(port_text)
         self.supervisor.stop(self.scrcpy)
         if self.tools.path("adb").exists():
-            try: self.run_and_log([str(self.tools.path("adb")), "disconnect", f"127.0.0.1:{port}"])
+            try: self.run_and_log([str(self.tools.path("adb")), "disconnect", f"127.0.0.1:{port}"], env=self.tools.adb_environment())
             except RuntimeError: pass
         self.supervisor.stop(self.tunnel)
         self.tunnel = self.scrcpy = None
