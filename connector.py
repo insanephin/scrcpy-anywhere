@@ -415,7 +415,15 @@ class Dashboard:
 
     def _launch_scrcpy(self, serial: str, port: int):
         self.supervisor.stop(self.scrcpy)
-        command = [str(self.tools.path("scrcpy")), "-s", serial]
+        command = [
+            str(self.tools.path("scrcpy")),
+            "-s",
+            serial,
+            "--force-adb-forward",
+            "--port=27183",
+            "--tunnel-host=127.0.0.1",
+            f"--tunnel-port={port}",
+        ]
         self.log("Running: " + " ".join(command))
         self.scrcpy = self.supervisor.spawn(command, env=self.remote_adb_environment(port))
         threading.Thread(target=self.pipe_output, args=(self.scrcpy, "scrcpy"), daemon=True).start()

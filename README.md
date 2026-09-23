@@ -5,11 +5,11 @@ A simple desktop application that connects to an ADB TCP service protected by Cl
 ## Architecture
 
 ```text
-Android Emulator (Docker) → ADB TCP :5555 → Cloudflare Access → cloudflared → adb → scrcpy
+Android Emulator → container ADB server / scrcpy stream mux :5555 → Cloudflare Access → cloudflared → adb + scrcpy
 ```
 
 - `connector.py`: A Tkinter desktop application that opens a Cloudflare Access TCP tunnel, then runs ADB and scrcpy.
-- `compose.yml`, `Dockerfile`, `entrypoint.sh`: An Android Emulator container with ADB TCP enabled on port 5555.
+- `compose.yml`, `Dockerfile`, `entrypoint.sh`: An Android Emulator container that multiplexes the authenticated ADB server and scrcpy stream through port 5555.
 
 ## Tested environment
 
@@ -34,7 +34,7 @@ On the emulator server, run:
 docker compose up --build -d
 ```
 
-Once the container has started, ADB TCP is enabled on port `5555` for the emulator inside it. To connect from another machine, configure a Cloudflare Tunnel TCP public hostname for the service.
+Once the container has started, its ADB control traffic and scrcpy stream share port `5555`. To connect from another machine, configure a Cloudflare Tunnel TCP public hostname for the service.
 
 <details>
 <summary>Example Cloudflare Tunnel configuration</summary>
@@ -51,7 +51,7 @@ Once the container has started, ADB TCP is enabled on port `5555` for the emulat
 
 The Compose configuration publishes emulator 1 at `127.0.0.1:5555` and emulator 2 at `127.0.0.1:5556`. The loopback-only binding prevents bypassing Cloudflare Access from another machine. A Linux host with `/dev/kvm` is required; Docker Desktop on Windows and macOS is not supported.
 
-ADB authentication is still active. Copy the matching server-side ADB private key to `tools/adbkey` on the client using a secure channel before connecting. Never commit or share that private key publicly.
+ADB authentication stays inside the container between its ADB server and emulator. The client talks to that already-authenticated ADB server, so no `adbkey` file is copied to or required on the client.
 
 ## Connect from a client
 

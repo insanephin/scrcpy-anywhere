@@ -41,8 +41,34 @@ done
 echo "Android emulator is ready."
 
 CONTAINER_IP=$(hostname -I | awk '{print $1}')
-socat TCP-LISTEN:5555,bind="$CONTAINER_IP",reuseaddr,fork TCP:127.0.0.1:5037 &
-SOCAT_PID=$!
-echo "ADB server relay listening on $CONTAINER_IP:5555 (server port 5037)."
+cat >/tmp/haproxy.cfg <<EOF
+global
+    log stdout format raw local0
 
-wait -n "$EMULATOR_PID" "$SOCAT_PID"
+defaults
+    mode tcp
+    log global
+    option tcplog
+    timeout connect 10s
+    timeout client 1h
+    timeout server 1h
+
+frontend cloudflare_access
+    bind ${CONTAINER_IP}:5555
+    tcp-request inspect-delay 5ms
+    tcp-request content accept if { req.len gt 0 }
+    use_backend adb_server if { req.len gt 0 }
+    default_backend scrcpy_stream
+
+backend adb_server
+    server adb 127.0.0.1:5037
+
+backend scrcpy_stream
+    server scrcpy 127.0.0.1:27183
+EOF
+
+haproxy -W -db -f /tmp/haproxy.cfg &
+HAPROXY_PID=$!
+echo "ADB/scrcpy relay listening on $CONTAINER_IP:5555 (ADB 5037, scrcpy 27183)."
+
+wait -n "$EMULATOR_PID" "$HAPROXY_PID"

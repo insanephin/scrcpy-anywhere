@@ -6,11 +6,11 @@ Cloudflare Access로 보호된 ADB TCP 서비스에 연결하고, `scrcpy`를 �
 ## 구성
 
 ```text
-Android Emulator (Docker) → ADB TCP :5555 → Cloudflare Access → cloudflared → adb → scrcpy
+Android Emulator → 컨테이너 ADB 서버/scrcpy 스트림 통합 :5555 → Cloudflare Access → cloudflared → adb + scrcpy
 ```
 
 - `connector.py`: Cloudflare Access TCP 터널을 열고 ADB 및 scrcpy를 실행하는 Tkinter 데스크톱 앱
-- `compose.yml`, `Dockerfile`, `entrypoint.sh`: ADB TCP(5555)를 활성화한 Android Emulator 컨테이너
+- `compose.yml`, `Dockerfile`, `entrypoint.sh`: 인증된 ADB 서버와 scrcpy 스트림을 5555 포트 하나로 전달하는 Android Emulator 컨테이너
 
 ## 테스트 환경
 
@@ -31,7 +31,7 @@ Android Emulator (Docker) → ADB TCP :5555 → Cloudflare Access → cloudflare
 docker compose up --build -d
 ```
 
-컨테이너가 부팅되면 내부 에뮬레이터의 ADB TCP 서비스가 5555 포트에서 활성화됩니다. 
+컨테이너가 부팅되면 ADB 제어 연결과 scrcpy 스트림이 5555 포트 하나를 함께 사용합니다.
 외부에서 연결하는 것을 전재로 설계된 프로젝트로 Cloudflared tunnel 설정을 필요로 합니다.
 <details>
 <summary>Cloudflare Tunnel 설정 예시</summary>
@@ -46,7 +46,7 @@ docker compose up --build -d
 
 Compose 설정은 에뮬레이터 1을 `127.0.0.1:5555`, 에뮬레이터 2를 `127.0.0.1:5556`에 공개합니다. 로컬 루프백으로만 바인딩하여 다른 장비가 Cloudflare Access를 우회하지 못하게 합니다. `/dev/kvm`을 사용할 수 있는 Linux 호스트가 필요하며 Windows 및 macOS용 Docker Desktop은 지원 대상이 아닙니다.
 
-ADB 자체 인증도 계속 사용합니다. 연결 전에 서버의 해당 ADB 개인 키를 안전한 방법으로 클라이언트의 `tools/adbkey`에 복사해야 합니다. 이 개인 키를 Git에 올리거나 공개해서는 안 됩니다.
+ADB 인증은 컨테이너의 ADB 서버와 에뮬레이터 사이에서만 처리됩니다. 클라이언트는 이미 인증된 서버 ADB를 사용하므로 클라이언트에 `adbkey`를 복사하거나 생성할 필요가 없습니다.
 
 ## 클라이언트 연결
 
