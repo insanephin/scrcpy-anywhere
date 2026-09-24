@@ -63,26 +63,36 @@ CLOUDFLARED = {
 }
 
 
+SYSTEM = platform.system()
+USER_AGENT = {"User-Agent": "adb-cloud-dashboard"}
+# Console-subsystem tools (cloudflared, adb, scrcpy) would otherwise open a console window on Windows.
+NO_WINDOW_FLAG = subprocess.CREATE_NO_WINDOW if SYSTEM == "Windows" else 0
+
+
 def normalized_machine() -> str:
     value = platform.machine().lower()
     return "arm64" if value in {"arm64", "aarch64"} else "x86_64"
 
 
 def executable_name(name: str) -> str:
-    return f"{name}.exe" if platform.system() == "Windows" else name
+    return f"{name}.exe" if SYSTEM == "Windows" else name
+
+
+def copy_stream(source, target: Path):
+    with source, target.open("wb") as output:
+        shutil.copyfileobj(source, output)
 
 
 class ProcessSupervisor:
     def __init__(self):
         self.processes: list[subprocess.Popen] = []
         self.job = None
-        if platform.system() == "Windows":
+        if SYSTEM == "Windows":
             self._create_windows_job()
         atexit.register(self.stop_all)
 
     def _create_windows_job(self):
         import ctypes
-        from ctypes import wintypes
         kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
         job = kernel32.CreateJobObjectW(None, None)
         if not job:
@@ -98,25 +108,23 @@ class ProcessSupervisor:
 
     @staticmethod
     def _linux_parent_death_signal():
-        if platform.system() == "Linux":
-            import ctypes
-            ctypes.CDLL(None).prctl(1, signal.SIGTERM)
+        import ctypes
+        ctypes.CDLL(None).prctl(1, signal.SIGTERM)
 
     def spawn(self, command: list[str], env: dict[str, str] | None = None) -> subprocess.Popen:
-        options = dict(stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+        options = dict(stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                        encoding="utf-8", errors="replace", env=env)
-        if platform.system() == "Windows":
-            options["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
-        elif platform.system() == "Linux":
+        if SYSTEM == "Windows":
+            options["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | NO_WINDOW_FLAG
+        elif SYSTEM == "Linux":
             options["preexec_fn"] = self._linux_parent_death_signal
         else:
             options["start_new_session"] = True
         process = subprocess.Popen(command, **options)
         if self.job is not None:
-            import ctypes
             from ctypes import wintypes
-            if not self._kernel32.AssignProcessToJobObject(self.job, wintypes.HANDLE(process._handle)):
-                pass
+            # Best effort: without the job, stop_all/atexit still terminates the child.
+            self._kernel32.AssignProcessToJobObject(self.job, wintypes.HANDLE(process._handle))
         self.processes.append(process)
         return process
 
@@ -222,7 +230,7 @@ class ScrcpyTaggedTcpProxy(TaggedTcpProxy):
 class ToolManager:
     def __init__(self, log):
         self.log = log
-        self.system = platform.system()
+        self.system = SYSTEM
         self.machine = normalized_machine()
         self.storage_dir = TOOLS_DIR
 
@@ -238,10 +246,9 @@ class ToolManager:
         target.parent.mkdir(parents=True, exist_ok=True)
         partial = target.with_name(target.name + ".part")
         partial.unlink(missing_ok=True)
-        request = urllib.request.Request(url, headers={"User-Agent": "adb-cloud-dashboard"})
+        request = urllib.request.Request(url, headers=USER_AGENT)
         try:
-            with urllib.request.urlopen(request, timeout=60) as source, partial.open("wb") as output:
-                shutil.copyfileobj(source, output)
+            copy_stream(urllib.request.urlopen(request, timeout=60), partial)
             partial.replace(target)
         except Exception:
             partial.unlink(missing_ok=True)
@@ -251,17 +258,20 @@ class ToolManager:
         if self.system != "Windows":
             path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
+    def extract_zip_folder(self, archive: Path, tool: str):
+        """Flatten the archive folder that contains the tool binary into the storage dir."""
+        with zipfile.ZipFile(archive) as zf:
+            names = zf.namelist()
+            binary = next(n for n in names if n.endswith("/" + executable_name(tool)))
+            prefix = binary.rsplit("/", 1)[0] + "/"
+            for name in names:
+                if name.startswith(prefix) and not name.endswith("/"):
+                    copy_stream(zf.open(name), self.storage_dir / Path(name).name)
+
     def install_platform_tools(self):
         archive = self.storage_dir / "platform-tools.zip"
         self.download(PLATFORM_TOOLS[self.system], archive)
-        with zipfile.ZipFile(archive) as zf:
-            member = next(n for n in zf.namelist() if n.endswith("/" + executable_name("adb")))
-            prefix = member.rsplit("/", 1)[0] + "/"
-            for name in zf.namelist():
-                if name.startswith(prefix) and not name.endswith("/"):
-                    destination = self.storage_dir / Path(name).name
-                    with zf.open(name) as src, destination.open("wb") as dst:
-                        shutil.copyfileobj(src, dst)
+        self.extract_zip_folder(archive, "adb")
         archive.unlink(missing_ok=True)
         self.make_executable(self.path("adb"))
 
@@ -275,10 +285,8 @@ class ToolManager:
             archive = self.storage_dir / "cloudflared.tgz"
             self.download(url, archive)
             with tarfile.open(archive, "r:gz") as tf:
-                binary = next(m for m in tf.getmembers() if Path(m.name).name == "cloudflared")
-                with tf.extractfile(binary) as src, target.open("wb") as dst:
-                    assert src is not None
-                    shutil.copyfileobj(src, dst)
+                binary = next(m for m in tf.getmembers() if m.isfile() and Path(m.name).name == "cloudflared")
+                copy_stream(tf.extractfile(binary), target)
             archive.unlink(missing_ok=True)
         else:
             self.download(url, target)
@@ -287,10 +295,8 @@ class ToolManager:
     def install_scrcpy(self):
         if self.system == "Linux":
             raise RuntimeError("Install the scrcpy package on Linux, then try again. (Ubuntu/Debian: sudo apt install scrcpy)")
-        data = json.loads(urllib.request.urlopen(
-            urllib.request.Request(GITHUB_RELEASE, headers={"User-Agent": "adb-cloud-dashboard"}), timeout=30
-        ).read())
-        assets = data.get("assets", [])
+        with urllib.request.urlopen(urllib.request.Request(GITHUB_RELEASE, headers=USER_AGENT), timeout=30) as response:
+            assets = json.load(response).get("assets", [])
         marker = "win64" if self.system == "Windows" else ("macos-aarch64" if self.machine == "arm64" else "macos-x86_64")
         asset = next((a for a in assets if marker in a["name"].lower() and a["name"].endswith((".zip", ".tar.gz"))), None)
         if not asset:
@@ -298,21 +304,14 @@ class ToolManager:
         archive = self.storage_dir / asset["name"]
         self.download(asset["browser_download_url"], archive)
         if archive.suffix == ".zip":
-            with zipfile.ZipFile(archive) as zf:
-                binary = next(n for n in zf.namelist() if n.endswith("/" + executable_name("scrcpy")))
-                prefix = binary.rsplit("/", 1)[0] + "/"
-                for name in zf.namelist():
-                    if name.startswith(prefix) and not name.endswith("/"):
-                        with zf.open(name) as src, (self.storage_dir / Path(name).name).open("wb") as dst:
-                            shutil.copyfileobj(src, dst)
+            self.extract_zip_folder(archive, "scrcpy")
         else:
             with tarfile.open(archive, "r:gz") as tf:
-                prefix = next(m.name.rsplit("/", 1)[0] + "/" for m in tf.getmembers() if Path(m.name).name == "scrcpy")
-                for member in tf.getmembers():
+                members = tf.getmembers()
+                prefix = next(m.name.rsplit("/", 1)[0] + "/" for m in members if Path(m.name).name == "scrcpy")
+                for member in members:
                     if member.isfile() and member.name.startswith(prefix):
-                        with tf.extractfile(member) as src, (self.storage_dir / Path(member.name).name).open("wb") as dst:
-                            assert src is not None
-                            shutil.copyfileobj(src, dst)
+                        copy_stream(tf.extractfile(member), self.storage_dir / Path(member.name).name)
         archive.unlink(missing_ok=True)
         self.make_executable(self.path("scrcpy"))
 
@@ -339,6 +338,8 @@ class Dashboard:
         self.port = StringVar(value=str(self.config.get("port", 5555)))
         self.status = StringVar(value="Ready")
         self.busy = False
+        self.log_lock = threading.Lock()
+        self.log_file = self.open_log_file()
         self.tools = ToolManager(self.log)
         self.build_ui()
         self.root.protocol("WM_DELETE_WINDOW", self.close)
@@ -385,31 +386,53 @@ class Dashboard:
         self.log_widget.pack(fill="both", expand=True, pady=(8, 0))
         self.log("Tool location: " + str(self.tools.storage_dir))
 
-    def log(self, message: str):
-        line = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {message}\n"
+    @staticmethod
+    def open_log_file():
         try:
             path = log_file_path()
             path.parent.mkdir(parents=True, exist_ok=True)
-            with path.open("a", encoding="utf-8") as logfile:
-                logfile.write(line)
+            return path.open("a", encoding="utf-8", buffering=1)
         except OSError:
-            pass
+            return None
+
+    def log(self, message: str):
+        line = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {message}\n"
+        if self.log_file is not None:
+            with self.log_lock:
+                try:
+                    self.log_file.write(line)
+                except (OSError, ValueError):
+                    pass
         self.events.put(("log", line))
 
+    def append_log(self, lines: list[str]):
+        self.log_widget.configure(state="normal")
+        self.log_widget.insert("end", "".join(lines))
+        self.log_widget.see("end")
+        self.log_widget.configure(state="disabled")
+
     def consume_events(self):
-        while not self.events.empty():
-            kind, value = self.events.get_nowait()
+        pending_logs: list[str] = []
+        while True:
+            try:
+                kind, value = self.events.get_nowait()
+            except queue.Empty:
+                break
             if kind == "log":
-                self.log_widget.configure(state="normal")
-                self.log_widget.insert("end", value)
-                self.log_widget.see("end")
-                self.log_widget.configure(state="disabled")
-            elif kind == "status": self.status.set(value)
+                pending_logs.append(value)
+                continue
+            # Flush first so log lines stay ordered relative to dialogs and status changes.
+            if pending_logs:
+                self.append_log(pending_logs)
+                pending_logs = []
+            if kind == "status": self.status.set(value)
             elif kind == "error": messagebox.showerror(APP_NAME, value)
             elif kind == "busy":
                 state = "disabled" if value else "normal"
                 for button in (self.download_button, self.connect_button, self.disconnect_button):
                     button.configure(state=state)
+        if pending_logs:
+            self.append_log(pending_logs)
         self.root.after(100, self.consume_events)
 
     def worker(self, label, fn):
@@ -441,8 +464,14 @@ class Dashboard:
 
     def pipe_output(self, process, label):
         assert process.stdout is not None
-        for line in iter(process.stdout.readline, ""):
+        for line in process.stdout:
             self.log(f"{label}: {line.rstrip()}")
+
+    def spawn_logged(self, label: str, command: list[str], env: dict[str, str] | None = None) -> subprocess.Popen:
+        self.log("Running: " + " ".join(command))
+        process = self.supervisor.spawn(command, env=env)
+        threading.Thread(target=self.pipe_output, args=(process, label), daemon=True).start()
+        return process
 
     def connect(self):
         hostname = self.domain.get().strip()
@@ -458,9 +487,7 @@ class Dashboard:
         self.supervisor.stop(self.tunnel)
         self.stop_proxies()
         command = [str(self.tools.path("cloudflared")), "access", "tcp", "--hostname", hostname, "--url", f"localhost:{port}"]
-        self.log("Running: " + " ".join(command))
-        self.tunnel = self.supervisor.spawn(command)
-        threading.Thread(target=self.pipe_output, args=(self.tunnel, "cloudflared"), daemon=True).start()
+        self.tunnel = self.spawn_logged("cloudflared", command)
         self.adb_proxy = TaggedTcpProxy(port, ADB_TUNNEL_MARKER, self.log)
         self.scrcpy_proxy = ScrcpyTaggedTcpProxy(port, self.log)
         adb = str(self.tools.path("adb"))
@@ -503,7 +530,8 @@ class Dashboard:
 
     def run_and_log(self, command: list[str], env: dict[str, str] | None = None) -> str:
         self.log("Running: " + " ".join(command))
-        completed = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30, env=env)
+        completed = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30, env=env,
+                                   stdin=subprocess.DEVNULL, creationflags=NO_WINDOW_FLAG)
         output = (completed.stdout + completed.stderr).strip()
         if output: self.log(output)
         if completed.returncode: raise RuntimeError(f"Command failed ({completed.returncode}): {' '.join(command)}")
@@ -520,16 +548,13 @@ class Dashboard:
             "--tunnel-host=127.0.0.1",
             f"--tunnel-port={scrcpy_port}",
         ]
-        self.log("Running: " + " ".join(command))
-        self.scrcpy = self.supervisor.spawn(command, env=self.remote_adb_environment(adb_port))
-        threading.Thread(target=self.pipe_output, args=(self.scrcpy, "scrcpy"), daemon=True).start()
+        self.scrcpy = self.spawn_logged("scrcpy", command, env=self.remote_adb_environment(adb_port))
         self.events.put(("status", "scrcpy is running"))
 
     def disconnect(self):
-        port_text = self.port.get()
-        self.worker("Disconnecting...", lambda: self._disconnect(port_text))
+        self.worker("Disconnecting...", self._disconnect)
 
-    def _disconnect(self, port_text: str):
+    def _disconnect(self):
         self.supervisor.stop(self.scrcpy)
         self.stop_proxies()
         self.supervisor.stop(self.tunnel)
@@ -546,6 +571,9 @@ class Dashboard:
         self.stop_proxies()
         self.supervisor.stop_all()
         self.root.destroy()
+        if self.log_file is not None:
+            with self.log_lock:
+                self.log_file.close()
 
     def run(self): self.root.mainloop()
 
