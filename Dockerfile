@@ -18,7 +18,7 @@ RUN apt-get update && apt-get install -y \
     libxi6 \
     libxrandr2 \
     libxtst6 \
-    haproxy \
+    socat \
     && rm -rf /var/lib/apt/lists/*
 
 ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
@@ -46,6 +46,9 @@ RUN echo "no" | avdmanager create avd \
     -n pixel \
     -k "system-images;android-36;google_apis_playstore;x86_64" \
     --force
+
+RUN apt-get update && apt-get install -y python3-minimal \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

@@ -5,7 +5,7 @@ A simple desktop application that connects to an ADB TCP service protected by Cl
 ## Architecture
 
 ```text
-Android Emulator → container ADB server / scrcpy stream mux :5555 → Cloudflare Access → cloudflared → adb + scrcpy
+Android Emulator → container ADB server / scrcpy stream mux :5555 → Cloudflare Access → cloudflared → tagged proxies → adb + scrcpy
 ```
 
 - `connector.py`: A Tkinter desktop application that opens a Cloudflare Access TCP tunnel, then runs ADB and scrcpy.
@@ -36,6 +36,8 @@ docker compose up --build -d
 
 Once the container has started, its ADB control traffic and scrcpy stream share port `5555`. To connect from another machine, configure a Cloudflare Tunnel TCP public hostname for the service.
 
+The client and server prefix every connection with an explicit `ADB` or `SCRCPY` marker, so routing does not depend on network timing. The marker protocol must match: when updating, deploy the server files and `scrcpy-anywhere.exe` from the same folder version together.
+
 <details>
 <summary>Example Cloudflare Tunnel configuration</summary>
 
@@ -53,6 +55,20 @@ The Compose configuration publishes emulator 1 at `127.0.0.1:5555` and emulator 
 
 ADB authentication stays inside the container between its ADB server and emulator. The client talks to that already-authenticated ADB server, so no `adbkey` file is copied to or required on the client.
 
+## Update and verify the server
+
+Replace the complete project folder on the server, then run these commands from that folder:
+
+```bash
+docker compose down
+docker compose up -d --build
+docker compose logs -f android-1
+```
+
+The server is ready when the log contains both `Android emulator is ready.` and `Tagged ADB/scrcpy relay listening`. Pressing `Ctrl+C` stops following the log but leaves the container running. To run only the first emulator, append `android-1` to the second command.
+
+Do not use `docker system prune -a -f` for a normal update: it removes unused images and caches belonging to unrelated projects too. Use `docker compose build --no-cache` only if reuse of a stale image has actually been confirmed.
+
 ## Connect from a client
 
 Run the following on a client machine:
@@ -65,6 +81,8 @@ python connector.py
 2. Leave **Local port** at its default value, `5555`.
 3. Click **Connect**.
 4. On first use, the application downloads the required tools and may open a Cloudflare Access sign-in flow. The tools are stored in a `tools` folder next to the launched application (for example, next to `scrcpy-anywhere.exe`), so they persist across launches.
+
+The updated server and client are a matched set. Using only the new EXE with an old server, or the old EXE with a new server, causes a `protocol fault` or a rejected marker.
 
 To end the session, click **Disconnect** or close the application. The most recently used hostname and port are saved to `adb-cloud-dashboard.json` in the user's home directory.
 

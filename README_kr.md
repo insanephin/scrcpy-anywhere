@@ -6,7 +6,7 @@ Cloudflare Access로 보호된 ADB TCP 서비스에 연결하고, `scrcpy`를 �
 ## 구성
 
 ```text
-Android Emulator → 컨테이너 ADB 서버/scrcpy 스트림 통합 :5555 → Cloudflare Access → cloudflared → adb + scrcpy
+Android Emulator → 컨테이너 ADB 서버/scrcpy 스트림 통합 :5555 → Cloudflare Access → cloudflared → 표식 프록시 → adb + scrcpy
 ```
 
 - `connector.py`: Cloudflare Access TCP 터널을 열고 ADB 및 scrcpy를 실행하는 Tkinter 데스크톱 앱
@@ -33,6 +33,8 @@ docker compose up --build -d
 
 컨테이너가 부팅되면 ADB 제어 연결과 scrcpy 스트림이 5555 포트 하나를 함께 사용합니다.
 외부에서 연결하는 것을 전재로 설계된 프로젝트로 Cloudflared tunnel 설정을 필요로 합니다.
+
+클라이언트와 서버는 각 연결에 `ADB` 또는 `SCRCPY` 표식을 사용해 시간 지연에 관계없이 같은 포트에서 정확히 구분합니다. 이 표식 규칙이 맞아야 하므로, 업데이트할 때는 이 폴더의 서버 파일과 `scrcpy-anywhere.exe`를 함께 교체하세요.
 <details>
 <summary>Cloudflare Tunnel 설정 예시</summary>
 | Subdomain / Domain | Path | Service Type | URL |
@@ -48,9 +50,23 @@ Compose 설정은 에뮬레이터 1을 `127.0.0.1:5555`, 에뮬레이터 2를 `1
 
 ADB 인증은 컨테이너의 ADB 서버와 에뮬레이터 사이에서만 처리됩니다. 클라이언트는 이미 인증된 서버 ADB를 사용하므로 클라이언트에 `adbkey`를 복사하거나 생성할 필요가 없습니다.
 
+## 서버 업데이트 및 확인
+
+서버에 이 폴더 전체를 교체한 뒤, 폴더 안에서 다음을 실행합니다.
+
+```bash
+docker compose down
+docker compose up -d --build
+docker compose logs -f android-1
+```
+
+로그에 `Android emulator is ready.`와 `Tagged ADB/scrcpy relay listening` 두 문구가 나오면 준비된 것입니다. `Ctrl+C`로 로그 보기만 종료해도 컨테이너는 계속 실행됩니다. 에뮬레이터 1만 필요하면 두 번째 명령 끝에 `android-1`을 붙이세요.
+
+`docker system prune -a -f`는 이 프로젝트와 관계없는 사용 중이 아닌 이미지와 캐시까지 삭제하므로 일반 업데이트에는 필요하지 않습니다. 이전 이미지가 정말 재사용되는 문제가 확인된 경우에만 `docker compose build --no-cache`를 사용하세요.
+
 ## 클라이언트 연결
 
-빌드파일 또는 다음을 입력하여 실행합니다. 
+제공된 `scrcpy-anywhere.exe`를 실행하거나 다음을 입력합니다.
 ```bash
 python connector.py
 ```
@@ -62,6 +78,8 @@ python connector.py
 2. **Local port**는 기본값 `5555`를 사용합니다.
 3. **Connect**를 누릅니다.
 4. 최초 실행 시 필요한 도구 다운로드 및 Cloudflare Access 로그인이 진행될 수 있습니다. 내려받은 도구는 실행한 애플리케이션(예: `scrcpy-anywhere.exe`)과 같은 폴더의 `tools`에 저장됩니다.
+
+이 수정본은 서버와 클라이언트가 세트입니다. 기존 서버에 새 EXE만 교체하거나, 새 서버에 기존 EXE를 사용하면 `protocol fault` 또는 표식 거부가 발생합니다.
 
 연결을 종료하려면 앱에서 **Disconnect**를 누르거나 창을 닫습니다. 마지막 hostname과 포트는 사용자 홈 디렉터리의 `adb-cloud-dashboard.json`에 저장됩니다.
 
