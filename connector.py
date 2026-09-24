@@ -19,14 +19,17 @@ import time
 import urllib.request
 import zipfile
 import atexit
+import base64
+import struct
 from pathlib import Path
-from tkinter import StringVar, Tk
+from tkinter import PhotoImage, StringVar, Tk
 from tkinter import ttk
 from tkinter.scrolledtext import ScrolledText
 from tkinter import messagebox
 
 APP_NAME = "cloudflared adb scrcpy quick-connect"
 APP_DIR = Path(__file__).resolve().parent
+ICON_FILE = "scrcpy-anywhere.ico"
 CONFIG_PATH = Path.home() / "adb-cloud-dashboard.json"
 ADB_TUNNEL_MARKER = b"SCRCPY-ANYWHERE/1 ADB\n"
 SCRCPY_TUNNEL_PREFIX = b"SCRCPY-ANYWHERE/1 SCRCPY "
@@ -36,6 +39,24 @@ def application_dir() -> Path:
     if getattr(sys, "frozen", False) or hasattr(sys, "_MEIPASS"):
         return Path(sys.executable).resolve().parent
     return APP_DIR
+
+
+def bundled_resource(name: str) -> Path:
+    return Path(getattr(sys, "_MEIPASS", APP_DIR)) / name
+
+
+def largest_png_in_ico(data: bytes) -> bytes | None:
+    _reserved, kind, count = struct.unpack_from("<HHH", data, 0)
+    if kind != 1:
+        return None
+    best: tuple[int, bytes] | None = None
+    for index in range(count):
+        width, height, _colors, _reserved, _planes, _bpp, size, offset = struct.unpack_from("<BBBBHHII", data, 6 + index * 16)
+        image = data[offset:offset + size]
+        area = (width or 256) * (height or 256)
+        if image.startswith(b"\x89PNG") and (best is None or area > best[0]):
+            best = (area, image)
+    return best[1] if best else None
 
 
 def tool_storage_dir() -> Path:
@@ -327,6 +348,7 @@ class Dashboard:
         self.root = Tk()
         self.root.title(APP_NAME)
         self.root.minsize(720, 520)
+        self.apply_window_icon()
         self.events: queue.Queue[tuple[str, str]] = queue.Queue()
         self.tunnel: subprocess.Popen | None = None
         self.scrcpy: subprocess.Popen | None = None
@@ -347,6 +369,19 @@ class Dashboard:
         if hasattr(signal, "SIGTERM"):
             signal.signal(signal.SIGTERM, self.handle_termination_signal)
         self.root.after(100, self.consume_events)
+
+    def apply_window_icon(self):
+        icon_path = bundled_resource(ICON_FILE)
+        try:
+            if platform.system() == "Windows":
+                self.root.iconbitmap(default=str(icon_path))
+                return
+            png = largest_png_in_ico(icon_path.read_bytes())
+            if png:
+                self.icon_image = PhotoImage(data=base64.b64encode(png))
+                self.root.iconphoto(True, self.icon_image)
+        except Exception:
+            pass
 
     def handle_termination_signal(self, _signum, _frame):
         self.stop_proxies()
