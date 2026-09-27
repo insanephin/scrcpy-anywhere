@@ -1,3 +1,6 @@
+# Per-emulator AVD data (bind-mounted into containers)
+emulators/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

@@ -6,8 +6,12 @@ services:
     container_name: android-1
     devices:
       - /dev/kvm:/dev/kvm
+      - /dev/dri:/dev/dri
+    volumes:
+      - ./emulators/android-1:/root/.android/avd
     ports:
       - "127.0.0.1:5555:5555"
+    stop_grace_period: 60s
     restart: unless-stopped
 
   android-2:
@@ -17,6 +21,10 @@ services:
     container_name: android-2
     devices:
       - /dev/kvm:/dev/kvm
+      - /dev/dri:/dev/dri
+    volumes:
+      - ./emulators/android-2:/root/.android/avd
     ports:
       - "127.0.0.1:5556:5555"
+    stop_grace_period: 60s
     restart: unless-stopped

@@ -47,7 +47,15 @@ RUN echo "no" | avdmanager create avd \
     -k "system-images;android-36;google_apis_playstore;x86_64" \
     --force
 
-RUN apt-get update && apt-get install -y python3-minimal \
+RUN cp -a /root/.android/avd /opt/avd-template
+
+RUN apt-get update && apt-get install -y \
+    python3-minimal \
+    libegl1 \
+    libgles2 \
+    libgl1-mesa-dri \
+    libvulkan1 \
+    mesa-vulkan-drivers \
     && rm -rf /var/lib/apt/lists/*
 
 COPY entrypoint.sh /entrypoint.sh
