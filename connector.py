@@ -10,6 +10,7 @@ import secrets
 import shutil
 import signal
 import socket
+import ssl
 import stat
 import subprocess
 import sys
@@ -133,6 +134,20 @@ def normalized_machine() -> str:
 
 def executable_name(name: str) -> str:
     return f"{name}.exe" if SYSTEM == "Windows" else name
+
+
+def ssl_context() -> ssl.SSLContext:
+    # python.org builds on macOS (and PyInstaller bundles) ship without a usable CA store.
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        return ssl.create_default_context()
+
+
+def urlopen(url: str, timeout: float):
+    request = urllib.request.Request(url, headers=USER_AGENT)
+    return urllib.request.urlopen(request, timeout=timeout, context=ssl_context())
 
 
 def copy_stream(source, target: Path):
@@ -303,9 +318,8 @@ class ToolManager:
         target.parent.mkdir(parents=True, exist_ok=True)
         partial = target.with_name(target.name + ".part")
         partial.unlink(missing_ok=True)
-        request = urllib.request.Request(url, headers=USER_AGENT)
         try:
-            copy_stream(urllib.request.urlopen(request, timeout=60), partial)
+            copy_stream(urlopen(url, timeout=60), partial)
             partial.replace(target)
         except Exception:
             partial.unlink(missing_ok=True)
@@ -352,7 +366,7 @@ class ToolManager:
     def install_scrcpy(self):
         if self.system == "Linux":
             raise RuntimeError("Install the scrcpy package on Linux, then try again. (Ubuntu/Debian: sudo apt install scrcpy)")
-        with urllib.request.urlopen(urllib.request.Request(GITHUB_RELEASE, headers=USER_AGENT), timeout=30) as response:
+        with urlopen(GITHUB_RELEASE, timeout=30) as response:
             assets = json.load(response).get("assets", [])
         marker = "win64" if self.system == "Windows" else ("macos-aarch64" if self.machine == "arm64" else "macos-x86_64")
         asset = next((a for a in assets if marker in a["name"].lower() and a["name"].endswith((".zip", ".tar.gz"))), None)
