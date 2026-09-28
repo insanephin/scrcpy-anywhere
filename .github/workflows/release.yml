@@ -21,14 +21,17 @@ jobs:
             name: Windows
             artifact_name: scrcpy-anywhere-windows
             asset_path: dist/scrcpy-anywhere.exe
+            bundle_mode: --onefile
           - os: ubuntu-latest
             name: Linux
             artifact_name: scrcpy-anywhere-linux
             asset_path: dist/scrcpy-anywhere
+            bundle_mode: --onefile
           - os: macos-latest
             name: macOS
             artifact_name: scrcpy-anywhere-macos
             asset_path: dist/scrcpy-anywhere-macos.dmg
+            bundle_mode: --onedir
 
     steps:
       - name: Check out repository
@@ -45,9 +48,9 @@ jobs:
       - name: Check source syntax
         run: python -m py_compile connector.py
 
-      - name: Build one-file application
+      - name: Build application
         run: >
-          pyinstaller --noconfirm --clean --onefile --windowed
+          pyinstaller --noconfirm --clean ${{ matrix.bundle_mode }} --windowed
           --icon scrcpy-anywhere.ico
           --add-data scrcpy-anywhere.ico:.
           --name scrcpy-anywhere connector.py
