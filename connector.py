@@ -719,11 +719,10 @@ class Dashboard:
         environment["ADB_SERVER_SOCKET"] = f"tcp:127.0.0.1:{port}"
         return environment
 
-    def wait_for_adb_device(self, adb: str, port: int, timeout: int = 60) -> str:
+    def wait_for_adb_device(self, adb: str, port: int, attempts: int = 3) -> str:
         """Allow time for the Access login and TCP listener to become ready."""
-        deadline = time.monotonic() + timeout
         last_error = ""
-        while time.monotonic() < deadline:
+        for attempt in range(1, attempts + 1):
             if self.tunnel is None or self.tunnel.poll() is not None:
                 raise RuntimeError("cloudflared exited before the adb tunnel became ready. Check the log.")
             try:
@@ -734,11 +733,11 @@ class Dashboard:
                         return fields[0]
             except RuntimeError as exc:
                 last_error = str(exc)
-            if time.monotonic() < deadline:
-                self.events.put(("status", "Waiting for Cloudflare Access authentication..."))
+            if attempt < attempts:
+                self.events.put(("status", f"Waiting for Cloudflare Access authentication... ({attempt}/{attempts})"))
                 time.sleep(2)
         suffix = f" Last adb error: {last_error}" if last_error else ""
-        raise RuntimeError(f"adb device was not found within {timeout} seconds. Check Access authentication and the cloudflared log." + suffix)
+        raise RuntimeError(f"adb device was not found after {attempts} attempts. Check Access authentication and the cloudflared log." + suffix)
 
     def run_and_log(self, command: list[str], env: dict[str, str] | None = None) -> str:
         self.log("Running: " + " ".join(command))
