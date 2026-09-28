@@ -28,7 +28,7 @@ jobs:
           - os: macos-latest
             name: macOS
             artifact_name: scrcpy-anywhere-macos
-            asset_path: dist/scrcpy-anywhere-macos.zip
+            asset_path: dist/scrcpy-anywhere-macos.dmg
 
     steps:
       - name: Check out repository
@@ -54,9 +54,12 @@ jobs:
 
       - name: Package macOS application bundle
         if: matrix.os == 'macos-latest'
-        run: >
-          ditto -c -k --sequesterRsrc --keepParent
-          dist/scrcpy-anywhere.app dist/scrcpy-anywhere-macos.zip
+        run: |
+          mkdir -p dist/dmg-root
+          cp -R dist/scrcpy-anywhere.app dist/dmg-root/
+          ln -s /Applications dist/dmg-root/Applications
+          hdiutil create -volname scrcpy-anywhere -srcfolder dist/dmg-root \
+            -ov -format UDZO dist/scrcpy-anywhere-macos.dmg
 
       - name: Upload release asset
         uses: actions/upload-artifact@v4
