@@ -529,6 +529,8 @@ class Dashboard:
         self.apply_theme()
         threading.Thread(target=self.watch_system_theme, daemon=True).start()
         self.root.protocol("WM_DELETE_WINDOW", self.close)
+        if SYSTEM == "Darwin":
+            self.root.createcommand("::tk::mac::Quit", self.close)
         signal.signal(signal.SIGINT, self.handle_termination_signal)
         if hasattr(signal, "SIGTERM"):
             signal.signal(signal.SIGTERM, self.handle_termination_signal)
