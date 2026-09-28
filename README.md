@@ -80,7 +80,13 @@ python connector.py
 1. Enter the Cloudflare Access TCP application hostname in **Access hostname**.
 2. Leave **Local port** at its default value, `5555`.
 3. Click **Connect**.
-4. On first use, the application downloads the required tools and may open a Cloudflare Access sign-in flow. The tools are stored in a `tools` folder next to the launched application (for example, next to `scrcpy-anywhere.exe`), so they persist across launches.
+4. On first use, the application downloads the required tools and may open a Cloudflare Access sign-in flow. The tools are stored in a `tools` folder in the install folder (next to the `scrcpy-anywhere.exe` launcher; on macOS, `~/Library/Application Support/scrcpy-anywhere`), so they persist across launches and updates.
+
+### Install and update
+
+Extract `scrcpy-anywhere-<windows|linux>.zip/.tar.gz` from [Releases](https://github.com/insanephin/scrcpy-anywhere/releases) into a writable folder, or on macOS drag the app from the `.dmg` into `/Applications`. The top-level `scrcpy-anywhere` executable is a launcher that runs the newest installed `app-<version>` folder.
+
+When a newer release exists, an **Update to vX.Y.Z** button appears in the header. It downloads the new version, verifies its SHA256, and unpacks it into a new `app-<version>` folder; restart to apply it. The running version is never modified, and the launcher keeps only the two newest versions.
 
 The updated server and client are a matched set. Using only the new EXE with an old server, or the old EXE with a new server, causes a `protocol fault` or a rejected marker.
 

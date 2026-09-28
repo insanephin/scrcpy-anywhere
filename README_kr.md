@@ -77,7 +77,13 @@ python connector.py
 1. **Access hostname**에 Cloudflare Access TCP 애플리케이션 hostname을 입력합니다.
 2. **Local port**는 기본값 `5555`를 사용합니다.
 3. **Connect**를 누릅니다.
-4. 최초 실행 시 필요한 도구 다운로드 및 Cloudflare Access 로그인이 진행될 수 있습니다. 내려받은 도구는 실행한 애플리케이션(예: `scrcpy-anywhere.exe`)과 같은 폴더의 `tools`에 저장됩니다.
+4. 최초 실행 시 필요한 도구 다운로드 및 Cloudflare Access 로그인이 진행될 수 있습니다. 내려받은 도구는 설치 폴더(`scrcpy-anywhere.exe` 런처가 있는 폴더, macOS는 `~/Library/Application Support/scrcpy-anywhere`)의 `tools`에 저장됩니다.
+
+### 설치와 업데이트
+
+[Releases](https://github.com/insanephin/scrcpy-anywhere/releases)에서 `scrcpy-anywhere-<windows|linux>.zip/.tar.gz`를 쓰기 가능한 폴더에 풀거나, macOS는 `.dmg`의 앱을 `/Applications`로 옮깁니다. 최상위 `scrcpy-anywhere` 실행 파일은 런처이며, 설치된 `app-<버전>` 폴더 중 가장 최신 버전을 실행합니다.
+
+새 릴리스가 있으면 앱 상단에 **Update to vX.Y.Z** 버튼이 나타납니다. 누르면 새 버전을 받아 SHA256을 확인한 뒤 새 `app-<버전>` 폴더에 풀고, 재시작하면 적용됩니다. 실행 중인 버전은 건드리지 않으며, 최근 두 버전만 남기고 나머지는 런처가 정리합니다.
 
 이 수정본은 서버와 클라이언트가 세트입니다. 기존 서버에 새 EXE만 교체하거나, 새 서버에 기존 EXE를 사용하면 `protocol fault` 또는 표식 거부가 발생합니다.
 

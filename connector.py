@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import itertools
 import os
 import platform
 import queue
+import re
 import select
 import secrets
 import shutil
@@ -18,6 +20,7 @@ import tarfile
 import threading
 import time
 import urllib.request
+import webbrowser
 import zipfile
 import atexit
 import base64
@@ -28,6 +31,11 @@ from tkinter import font as tkfont
 from tkinter import ttk
 from tkinter import messagebox
 
+try:
+    from _version import VERSION
+except ImportError:
+    VERSION = "0.0.0"
+
 APP_NAME = "cloudflared adb scrcpy quick-connect"
 APP_DIR = Path(__file__).resolve().parent
 ICON_FILE = "scrcpy-anywhere.ico"
@@ -37,6 +45,9 @@ SCRCPY_TUNNEL_PREFIX = b"SCRCPY-ANYWHERE/1 SCRCPY "
 
 
 def application_dir() -> Path:
+    home = os.environ.get("SCRCPY_ANYWHERE_HOME")
+    if home:
+        return Path(home)
     if getattr(sys, "frozen", False) or hasattr(sys, "_MEIPASS"):
         return Path(sys.executable).resolve().parent
     return APP_DIR
@@ -127,6 +138,15 @@ USER_AGENT = {"User-Agent": "adb-cloud-dashboard"}
 NO_WINDOW_FLAG = subprocess.CREATE_NO_WINDOW if SYSTEM == "Windows" else 0
 
 
+UPDATE_RELEASE = "https://api.github.com/repos/insanephin/scrcpy-anywhere/releases/latest"
+UPDATE_ASSETS = {
+    "Windows": "scrcpy-anywhere-update-windows.zip",
+    "Darwin": "scrcpy-anywhere-update-macos.tar.gz",
+    "Linux": "scrcpy-anywhere-update-linux.tar.gz",
+}
+UPDATE_CHECKSUMS = "SHA256SUMS"
+
+
 def normalized_machine() -> str:
     value = platform.machine().lower()
     return "arm64" if value in {"arm64", "aarch64"} else "x86_64"
@@ -153,6 +173,92 @@ def urlopen(url: str, timeout: float):
 def copy_stream(source, target: Path):
     with source, target.open("wb") as output:
         shutil.copyfileobj(source, output)
+
+
+def parse_version(text: str) -> tuple[int, ...] | None:
+    match = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)", text.strip())
+    return tuple(int(part) for part in match.groups()) if match else None
+
+
+class Updater:
+    """Unpacks new releases into app-<version> next to the running one; launcher.py starts the newest."""
+
+    def __init__(self, log):
+        self.log = log
+        self.home = application_dir()
+        launcher = os.environ.get("SCRCPY_ANYWHERE_LAUNCHER")
+        self.launcher = Path(launcher) if launcher else None
+
+    @property
+    def can_install(self) -> bool:
+        return self.launcher is not None and self.launcher.exists() and SYSTEM in UPDATE_ASSETS
+
+    def newer_release(self) -> dict | None:
+        with urlopen(UPDATE_RELEASE, timeout=30) as response:
+            release = json.load(response)
+        latest, current = parse_version(release.get("tag_name", "")), parse_version(VERSION)
+        return release if latest and current and latest > current else None
+
+    @staticmethod
+    def app_executable(version_dir: Path) -> Path:
+        if SYSTEM == "Darwin":
+            return version_dir / "scrcpy-anywhere.app" / "Contents" / "MacOS" / "scrcpy-anywhere"
+        return version_dir / executable_name("scrcpy-anywhere")
+
+    def install(self, release: dict) -> str:
+        version = ".".join(map(str, parse_version(release["tag_name"])))
+        target = self.home / f"app-{version}"
+        if self.app_executable(target).is_file():
+            return version
+        assets = {asset["name"]: asset["browser_download_url"] for asset in release.get("assets", [])}
+        name = UPDATE_ASSETS[SYSTEM]
+        if name not in assets or UPDATE_CHECKSUMS not in assets:
+            raise RuntimeError(f"Release {release['tag_name']} has no {name} or {UPDATE_CHECKSUMS} asset.")
+        with urlopen(assets[UPDATE_CHECKSUMS], timeout=30) as response:
+            checksums = {parts[1].lstrip("*"): parts[0].lower() for parts in
+                         (line.split() for line in response.read().decode().splitlines()) if len(parts) == 2}
+        if name not in checksums:
+            raise RuntimeError(f"{UPDATE_CHECKSUMS} does not list {name}.")
+
+        archive = self.home / f".{name}.download"
+        staging = self.home / f".app-{version}.partial"
+        shutil.rmtree(staging, ignore_errors=True)
+        try:
+            self.log(f"Downloading update: {assets[name]}")
+            digest = hashlib.sha256()
+            with urlopen(assets[name], timeout=60) as source, archive.open("wb") as output:
+                while chunk := source.read(1 << 20):
+                    digest.update(chunk)
+                    output.write(chunk)
+            if digest.hexdigest() != checksums[name]:
+                raise RuntimeError(f"Checksum mismatch for {name}; the download was discarded.")
+            staging.mkdir(parents=True)
+            if name.endswith(".zip"):
+                with zipfile.ZipFile(archive) as zf:
+                    zf.extractall(staging)
+            else:
+                with tarfile.open(archive, "r:gz") as tf:
+                    tf.extractall(staging, filter="data")
+            if not self.app_executable(staging).is_file():
+                raise RuntimeError(f"{name} does not contain the application executable.")
+            shutil.rmtree(target, ignore_errors=True)
+            staging.rename(target)
+        finally:
+            archive.unlink(missing_ok=True)
+            shutil.rmtree(staging, ignore_errors=True)
+        return version
+
+    def restart(self):
+        environment = os.environ.copy()
+        environment["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+        if "LD_LIBRARY_PATH_ORIG" in environment:
+            environment["LD_LIBRARY_PATH"] = environment.pop("LD_LIBRARY_PATH_ORIG")
+        else:
+            environment.pop("LD_LIBRARY_PATH", None)
+        options = ({"creationflags": subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP}
+                   if SYSTEM == "Windows" else {"start_new_session": True})
+        subprocess.Popen([str(self.launcher)], env=environment, close_fds=True, stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **options)
 
 
 class ProcessSupervisor:
@@ -415,6 +521,8 @@ class Dashboard:
         self.log_lock = threading.Lock()
         self.log_file = self.open_log_file()
         self.tools = ToolManager(self.log)
+        self.updater = Updater(self.log)
+        self.pending_update: dict | None = None
         self.style = ttk.Style(self.root)
         self.style.theme_use("clam")
         self.build_ui()
@@ -425,6 +533,8 @@ class Dashboard:
         if hasattr(signal, "SIGTERM"):
             signal.signal(signal.SIGTERM, self.handle_termination_signal)
         self.root.after(100, self.consume_events)
+        if getattr(sys, "frozen", False):
+            threading.Thread(target=self.check_for_update, daemon=True).start()
 
     def apply_window_icon(self):
         icon_path = bundled_resource(ICON_FILE)
@@ -470,7 +580,8 @@ class Dashboard:
         ttk.Label(header, text="scrcpy anywhere", style="Title.TLabel").pack(side="left")
         self.theme_button = ttk.Button(header, command=self.cycle_theme, style="Ghost.TButton")
         self.theme_button.pack(side="right")
-        ttk.Label(frame, text="Cloudflare Access \u2192 adb \u2192 scrcpy", style="Muted.TLabel").pack(anchor="w", pady=(2, 0))
+        self.update_button = ttk.Button(header, command=self.install_update, style="Ghost.TButton")
+        ttk.Label(frame, text=f"Cloudflare Access \u2192 adb \u2192 scrcpy \u00b7 v{VERSION}", style="Muted.TLabel").pack(anchor="w", pady=(2, 0))
 
         form = ttk.Frame(frame)
         form.pack(fill="x", pady=(18, 0))
@@ -639,9 +750,14 @@ class Dashboard:
                 self.system_dark = value
                 self.apply_theme()
             elif kind == "error": messagebox.showerror(APP_NAME, value)
+            elif kind == "update":
+                self.pending_update = value
+                self.update_button.configure(text=f"Update to {value['tag_name']}")
+                self.update_button.pack(side="right", padx=(0, 4))
+            elif kind == "update_ready": self.prompt_restart(value)
             elif kind == "busy":
                 state = "disabled" if value else "normal"
-                for button in (self.download_button, self.connect_button, self.disconnect_button):
+                for button in (self.download_button, self.connect_button, self.disconnect_button, self.update_button):
                     button.configure(state=state)
         if pending_logs:
             self.append_log(pending_logs)
@@ -673,6 +789,42 @@ class Dashboard:
         self.tools.ensure()
         self.log("cloudflared, adb, and scrcpy are ready")
         self.events.put(("status", "Tools ready"))
+
+    def check_for_update(self):
+        try:
+            release = self.updater.newer_release()
+        except Exception as exc:
+            self.log(f"Update check failed: {exc}")
+            return
+        if release:
+            self.log(f"Update available: {release['tag_name']} (current v{VERSION})")
+            self.events.put(("update", release))
+
+    def install_update(self):
+        release = self.pending_update
+        if release is None:
+            return
+        if not self.updater.can_install:
+            self.log("Not started from the launcher; opening the release page instead.")
+            webbrowser.open(release["html_url"])
+            return
+        self.worker("Downloading update...", lambda: self._install_update(release))
+
+    def _install_update(self, release: dict):
+        version = self.updater.install(release)
+        self.log(f"Version {version} installed to {self.updater.home / f'app-{version}'}")
+        self.events.put(("status", f"Update {version} ready; restart to apply"))
+        self.events.put(("update_ready", version))
+
+    def prompt_restart(self, version: str):
+        self.update_button.pack_forget()
+        self.pending_update = None
+        if messagebox.askyesno(APP_NAME, f"Version {version} is installed.\nRestart now? Any active session will be closed."):
+            self.root.after(0, self.restart_for_update)
+
+    def restart_for_update(self):
+        self.close()
+        self.updater.restart()
 
     def pipe_output(self, process, label):
         assert process.stdout is not None
