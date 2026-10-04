@@ -1,6 +1,6 @@
 # scrcpy-anywhere
 
-A simple desktop application that connects to an ADB TCP service protected by Cloudflare Access and launches `scrcpy`. The included Docker Compose configuration runs Android on the server: [Redroid](https://github.com/remote-android/redroid-doc) (Android in a container, with Play Store and ARM translation) by default, or the headless Android Emulator as an alternative profile.
+A simple desktop application that connects to an ADB TCP service protected by Cloudflare Access and launches `scrcpy`. The included Docker Compose configuration runs Android on the server: [Redroid](https://github.com/remote-android/redroid-doc) (Android in a container, with Play Store and ARM translation).
 
 ## Architecture
 
@@ -11,7 +11,6 @@ Redroid ─(internal Docker network)→ relay: ADB server / scrcpy stream mux :5
 - `connector.py`: A Tkinter desktop application that opens a Cloudflare Access TCP tunnel, then runs ADB and scrcpy.
 - `redroid/`: Builds the Redroid 12 image with MindTheGapps (Play Store) and libndk_translation (ARM apps on x86_64).
 - `relay/`, `relay.py`: A sidecar that keeps its ADB server connected to Redroid and multiplexes that ADB server and the scrcpy stream through port 5555.
-- `Dockerfile`, `entrypoint.sh`: The Android Emulator container (`emulator` profile). It uses the same `relay.py`.
 - `compose.yml`: Two instances of each by default (`redroid-1` + `relay-1`, `redroid-2` + `relay-2`).
 
 ## Tested environment
@@ -75,15 +74,21 @@ Settings are read from the environment or from a `.env` file next to `compose.ym
 | :--- | :--- | :--- |
 | `REDROID_WIDTH` / `REDROID_HEIGHT` | `720` / `1280` | Display resolution |
 | `REDROID_DPI` | `320` | Display density |
+| `REDROID_GPU_MODE` | `guest` | `guest`: software rendering on the CPU; `host`: render on the host GPU (`/dev/dri`, AMD/Intel via Mesa) |
 | `REDROID_FPS` | `30` | Display frame rate (lower saves CPU) |
 | `REDROID_CCODEC` | `1` | Codec2 mode; `0` restores Redroid's default (breaks scrcpy's default Opus audio) |
 | `RELAY_1_PORT` / `RELAY_2_PORT` | `5555` / `5556` | Host port (always bound to `127.0.0.1`) |
 
-Rendering is software-only (`androidboot.redroid_gpu_mode=guest`), so no GPU is needed. Android data (`/data`: installed apps, game data, Google account) is kept in the named volumes `redroid-1-data` and `redroid-2-data`, so it survives `docker compose down` and image rebuilds. **`docker compose down -v` deletes these volumes**; do not use `-v` unless you want to wipe the devices.
+By default rendering is software-only (`REDROID_GPU_MODE=guest`), so no GPU is needed. If the host has an AMD or Intel GPU, `REDROID_GPU_MODE=host` moves rendering to it and greatly reduces CPU use: on a Ryzen 5 6600H (Radeon 680M), a scrolling UI reached only 22–28 fps at the 2-CPU limit in `guest` mode, but 30 fps at about 0.85 CPU and 60 fps at about 1.2–1.45 CPU in `host` mode. With `host` mode, most of the remaining CPU is scrcpy's software video encoder, which runs only while a client is connected. Each instance's data is kept in the local `emulators/redroid-N/` folder, so it survives `docker compose down` and image rebuilds:
+
+- `emulators/redroid-N/data/`: Android `/data` (installed apps, game data, Google account, GSF Android ID)
+- `emulators/redroid-N/adb/`: the relay's ADB key
+
+The files are owned by root and Android user IDs, so use `sudo` to back them up or delete them. Stop the instance first (`docker compose stop relay-1 redroid-1`) and copy with ownership and extended attributes preserved, for example `sudo tar --xattrs -czpf redroid-1.tgz -C emulators redroid-1`. Deleting `emulators/redroid-N/data/` wipes the device. `emulators/` is excluded from Git and from the Docker build context.
 
 The relay's ADB traffic and the scrcpy stream share port `5555`. To connect from another machine, configure a Cloudflare Tunnel TCP public hostname for the service.
 
-The client and server prefix every connection with an explicit `ADB` or `SCRCPY` marker, so routing does not depend on network timing. The Redroid setup uses the same marker protocol as the emulator setup, so existing clients work unchanged. When the protocol changes in a future release, deploy the server files and `scrcpy-anywhere.exe` from the same folder version together.
+The client and server prefix every connection with an explicit `ADB` or `SCRCPY` marker, so routing does not depend on network timing. The Redroid setup uses the same marker protocol as the earlier Android Emulator setup, so existing clients work unchanged. When the protocol changes in a future release, deploy the server files and `scrcpy-anywhere.exe` from the same folder version together.
 
 <details>
 <summary>Example Cloudflare Tunnel configuration</summary>
@@ -100,7 +105,7 @@ The client and server prefix every connection with an explicit `ADB` or `SCRCPY`
 
 The relay ports are bound to `127.0.0.1` only. The loopback-only binding prevents bypassing Cloudflare Access from another machine. A Linux host is required; Docker Desktop on Windows and macOS is not supported.
 
-ADB authentication stays inside the server: the relay's ADB server talks to Redroid on the internal Docker network, and its key is kept in the `relay-N-adb` volume. The client talks to that ADB server, so no `adbkey` file is copied to or required on the client.
+ADB authentication stays inside the server: the relay's ADB server talks to Redroid on the internal Docker network, and its key is kept in `emulators/redroid-N/adb/`. The client talks to that ADB server, so no `adbkey` file is copied to or required on the client.
 
 ### Ready state and unattended operation
 
@@ -121,7 +126,7 @@ Tagged ADB/scrcpy relay listening on ...
 Android device is ready: redroid-1:5555 (stay-on, no screen timeout, doze disabled).
 ```
 
-These replace the emulator's `Android emulator is ready.` message. `docker compose ps` also shows the health: `redroid-N` is healthy when `sys.boot_completed` is `1`, and `relay-N` is healthy when the relay answers an ADB request through port 5555 and the device is booted and configured.
+These replace the `Android emulator is ready.` message of the earlier Android Emulator setup. `docker compose ps` also shows the health: `redroid-N` is healthy when `sys.boot_completed` is `1`, and `relay-N` is healthy when the relay answers an ADB request through port 5555 and the device is booted and configured.
 
 ### Notes on the image
 
@@ -154,21 +159,9 @@ Redroid is not a Google-certified device, so the Play Store may refuse to sign i
 
 2. **Register it.** While signed in with the Google account you will use on the device, open <https://www.google.com/android/uncertified/>, enter the number from step 1, and submit. It can take from a few minutes to several hours to take effect. Then run `docker restart redroid-1` (the relay reconnects automatically). If the Play Store still complains, also clear its data: `docker exec relay-1 adb -s redroid-1:5555 shell pm clear com.android.vending`. Do not clear `com.google.android.gsf`, because that generates a new Android ID that must be registered again.
 
-   The ID stays the same as long as the `redroid-N-data` volume is kept. A new or wiped volume needs a new registration, and each instance is registered separately.
+   The ID stays the same as long as `emulators/redroid-N/data/` is kept. A new or wiped data folder needs a new registration, and each instance is registered separately.
 
 3. **Install the app.** Connect with the client, open the Play Store, sign in, and install the target app. To turn on automatic updates, open the Play Store, then tap the profile icon → **Settings** → **Network preferences** → **Auto-update apps** → **Over any network**.
-
-## Android Emulator (alternative)
-
-The previous emulator setup is still available through the `emulator` Compose profile. It needs `/dev/kvm`, and it publishes the same host ports (`5555`, `5556`, `5557`) as the relays, so stop the Redroid services first:
-
-```bash
-docker compose stop relay-1 redroid-1
-docker compose --profile emulator up -d --build android-1
-docker compose logs -f android-1
-```
-
-The emulator is ready when its log contains both `Android emulator is ready.` and `Tagged ADB/scrcpy relay listening`. Emulator data is kept in `emulators/android-N/`. Data is not migrated between the emulator and Redroid.
 
 ## Update and verify the server
 
@@ -233,8 +226,7 @@ To end the session, click **Disconnect** or close the application. The most rece
 - Configure Cloudflare Access policies so only authorized users can reach the TCP application.
 - **Redroid runs `--privileged`** (`privileged: true`). Android's init has to mount binderfs, cgroups and other filesystems and to change kernel parameters, which ordinary containers are not allowed to do. A privileged container has all capabilities and access to host devices, so an escape from Android (for example through a malicious app) amounts to root on the host. Run it only on a trusted, dedicated host, and install only apps you trust.
 - Redroid's ADB (port 5555 inside the container) does not require authentication. It is reachable only from containers on this project's Docker network and is never published to the host. Do not add `ports:` to the `redroid-N` services.
-- The `emulator` profile maps `/dev/kvm` (and `/dev/dri`) for emulator acceleration. The Redroid path does not need them.
-- This project downloads the Redroid image, MindTheGapps, libndk_translation, the Android Emulator image, and external tools such as `scrcpy` and `cloudflared`. Review their licenses and distribution policies.
+- This project downloads the Redroid image, MindTheGapps, libndk_translation, and external tools such as `scrcpy` and `cloudflared`. Review their licenses and distribution policies.
 
 ## License
 

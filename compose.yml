@@ -4,7 +4,7 @@ x-redroid: &redroid
   image: scrcpy-anywhere-redroid:12.0.0-mtg-ndk
   privileged: true
   command:
-    - androidboot.redroid_gpu_mode=guest
+    - androidboot.redroid_gpu_mode=${REDROID_GPU_MODE:-guest}
     - androidboot.redroid_width=${REDROID_WIDTH:-720}
     - androidboot.redroid_height=${REDROID_HEIGHT:-1280}
     - androidboot.redroid_dpi=${REDROID_DPI:-320}
@@ -36,7 +36,7 @@ services:
     <<: *redroid
     container_name: redroid-1
     volumes:
-      - redroid-1-data:/data
+      - ./emulators/redroid-1/data:/data
 
   relay-1:
     <<: *relay
@@ -44,7 +44,7 @@ services:
     environment:
       ADB_DEVICE: redroid-1:5555
     volumes:
-      - relay-1-adb:/root/.android
+      - ./emulators/redroid-1/adb:/root/.android
     ports:
       - "127.0.0.1:${RELAY_1_PORT:-5555}:5555"
     depends_on:
@@ -54,7 +54,7 @@ services:
     <<: *redroid
     container_name: redroid-2
     volumes:
-      - redroid-2-data:/data
+      - ./emulators/redroid-2/data:/data
 
   relay-2:
     <<: *relay
@@ -62,65 +62,8 @@ services:
     environment:
       ADB_DEVICE: redroid-2:5555
     volumes:
-      - relay-2-adb:/root/.android
+      - ./emulators/redroid-2/adb:/root/.android
     ports:
       - "127.0.0.1:${RELAY_2_PORT:-5556}:5555"
     depends_on:
       - redroid-2
-
-  android-1:
-    profiles: [emulator]
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: android-1
-    devices:
-      - /dev/kvm:/dev/kvm
-      - /dev/dri:/dev/dri
-    volumes:
-      - ./emulators/android-1:/root/.android/avd
-    ports:
-      - "127.0.0.1:5555:5555"
-    cpus: 2
-    stop_grace_period: 60s
-    restart: unless-stopped
-
-  android-2:
-    profiles: [emulator]
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: android-2
-    devices:
-      - /dev/kvm:/dev/kvm
-      - /dev/dri:/dev/dri
-    volumes:
-      - ./emulators/android-2:/root/.android/avd
-    ports:
-      - "127.0.0.1:5556:5555"
-    cpus: 2
-    stop_grace_period: 60s
-    restart: unless-stopped
-
-  android-3:
-    profiles: [emulator]
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: android-3
-    devices:
-      - /dev/kvm:/dev/kvm
-      - /dev/dri:/dev/dri
-    volumes:
-      - ./emulators/android-3:/root/.android/avd
-    ports:
-      - "127.0.0.1:5557:5555"
-    cpus: 2
-    stop_grace_period: 60s
-    restart: unless-stopped
-
-volumes:
-  redroid-1-data:
-  redroid-2-data:
-  relay-1-adb:
-  relay-2-adb:
