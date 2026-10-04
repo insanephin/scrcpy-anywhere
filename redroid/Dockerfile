@@ -19,21 +19,7 @@ RUN set -eu; \
     find /out/gapps -type d -exec chmod 755 {} +; \
     find /out/gapps -type f -exec chmod 644 {} +
 
-ARG NDK_COMMIT=9324a8914b649b885dad6f2bfd14a67e5d1520bf
-RUN set -eu; \
-    mkdir -p /out/ndk; \
-    if [ "$TARGETARCH" = amd64 ]; then \
-        curl -fsSL -o /tmp/ndk.zip \
-            "https://github.com/supremegamers/vendor_google_proprietary_ndk_translation-prebuilt/archive/$NDK_COMMIT.zip"; \
-        echo "87089b896ce6fed313dd5c2dd1bf22db857621c27e04471aadda69a1a2795fa1  /tmp/ndk.zip" | sha256sum -c -; \
-        unzip -q /tmp/ndk.zip -d /tmp/ndk; \
-        mv "/tmp/ndk/vendor_google_proprietary_ndk_translation-prebuilt-$NDK_COMMIT/prebuilts" /out/ndk/system; \
-        chmod -R 755 /out/ndk/system; \
-        chmod 644 /out/ndk/system/etc/init/ndk_translation.rc; \
-    fi
-
 FROM ${REDROID_BASE}
 COPY --from=fetch /out/gapps/ /
-COPY --from=fetch /out/ndk/ /
 COPY --chmod=644 scrcpy-anywhere.rc /system/etc/init/scrcpy-anywhere.rc
 ENTRYPOINT ["/init", "androidboot.hardware=redroid", "ro.setupwizard.mode=DISABLED"]

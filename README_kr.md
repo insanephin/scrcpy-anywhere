@@ -10,7 +10,7 @@ Redroid ─(내부 Docker 네트워크)→ relay: ADB 서버/scrcpy 스트림 �
 ```
 
 - `connector.py`: Cloudflare Access TCP 터널을 열고 ADB 및 scrcpy를 실행하는 Tkinter 데스크톱 앱
-- `redroid/`: MindTheGapps(Play 스토어)와 libndk_translation(x86_64에서 ARM 앱 실행)을 포함한 Redroid 12 이미지 빌드
+- `redroid/`: MindTheGapps(Play 스토어)를 포함한 Redroid 12 이미지 빌드. arm64 앱은 베이스 이미지의 libndk_translation으로 x86_64에서 실행
 - `relay/`, `relay.py`: Redroid에 연결된 ADB 서버를 유지하고, ADB와 scrcpy 스트림을 5555 포트 하나로 전달하는 사이드카
 - `compose.yml`: 기본으로 2세트(`redroid-1` + `relay-1`, `redroid-2` + `relay-2`)
 
@@ -56,7 +56,7 @@ echo 'options binder_linux devices="binder,hwbinder,vndbinder"' | sudo tee /etc/
 docker compose up -d --build
 ```
 
-첫 빌드 때 Redroid 베이스 이미지(약 1GB)와 GApps/libndk 압축 파일(SHA256 검증)을 내려받습니다. 첫 부팅은 1~2분, 이후 부팅은 30초 정도 걸립니다. 첫 번째 인스턴스만 필요하면 `docker compose up -d --build redroid-1 relay-1`을 실행하세요.
+첫 빌드 때 Redroid 베이스 이미지(약 1GB)와 MindTheGapps 압축 파일(SHA256 검증)을 내려받습니다. 첫 부팅은 1~2분, 이후 부팅은 30초 정도 걸립니다. 첫 번째 인스턴스만 필요하면 `docker compose up -d --build redroid-1 relay-1`을 실행하세요.
 
 인스턴스마다 컨테이너 2개로 구성됩니다.
 
@@ -126,9 +126,9 @@ Android device is ready: redroid-1:5555 (stay-on, no screen timeout, doze disabl
 
 ### 이미지 관련 참고
 
-- **Android 버전: 12.** `redroid-script`는 libndk를 Android 11과 12에서만 설치합니다(`-n` 옵션이 `11.0.0`, `12.0.0`, `12.0.0_64only`로 제한). MindTheGapps는 12~15를 지원합니다. 둘 다 지원하는 최신 버전이 12입니다. 베이스 이미지는 `redroid/redroid:12.0.0-240527`(현재 `12.0.0-latest`와 동일)로 고정했습니다.
-- **ARM 번역.** 공식 이미지에는 64비트용 libndk만 있습니다. 빌드에서 `redroid-script`가 쓰는 libndk_translation 프리빌트를 추가해 32비트 ARM(`armeabi-v7a`)도 지원합니다. 32비트와 64비트 ARM 바이너리 실행을 모두 확인했습니다.
-- **arm64 호스트.** 빌드가 아키텍처를 감지합니다. arm64에서는 arm64용 MindTheGapps만 넣고 libndk는 생략합니다(ARM 앱이 네이티브로 실행됨). Google platform-tools는 x86_64 전용이라 릴레이는 Ubuntu의 `adb` 패키지를 사용합니다. 테스트는 x86_64에서만 했습니다.
+- **Android 버전: 12.** `redroid-script`가 MindTheGapps와 libndk를 모두 지원하는 최신 버전이고(`-n` 옵션이 `11.0.0`, `12.0.0`, `12.0.0_64only`로 제한), 공식 이미지에 동작하는 arm64 libndk_translation이 들어 있습니다. 베이스 이미지는 `redroid/redroid:12.0.0-240527`(현재 `12.0.0-latest`와 동일)로 고정했습니다.
+- **ARM 번역: arm64 전용.** 공식 이미지에 들어 있는 libndk_translation을 그대로 쓰며, arm64(`arm64-v8a`)만 번역합니다. 32비트 ARM(`armeabi-v7a`) 라이브러리만 들어 있는 앱은 실행되지 않습니다. `redroid-script`의 libndk 프리빌트(`-n`)는 추가하지 마세요. Android 12에서 이미지의 라이브러리를 덮어써서 arm64 앱이 시작하자마자 `ndk_translation::AppProcessPostInit()`에서 크래시합니다(Grow Castle로 확인).
+- **arm64 호스트.** 빌드가 아키텍처를 감지합니다. arm64에서는 arm64용 MindTheGapps를 넣으며, ARM 앱은 네이티브로 실행됩니다. Google platform-tools는 x86_64 전용이라 릴레이는 Ubuntu의 `adb` 패키지를 사용합니다. 테스트는 x86_64에서만 했습니다.
 - **Codec2.** Redroid는 Codec2를 끄는데(`debug.stagefright.ccodec=0`), 그러면 Opus 인코더가 없습니다. scrcpy는 기본으로 Opus 오디오를 캡처하므로 Codec2 없이는 세션이 실패합니다. 이미지에서 `/system/etc/init/scrcpy-anywhere.rc`로 Codec2를 다시 켭니다.
 - MindTheGapps에 대해 `redroid-script`가 하는 것처럼 Google 설정 마법사를 건너뜁니다(`ro.setupwizard.mode=DISABLED`).
 

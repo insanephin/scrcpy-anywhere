@@ -9,7 +9,7 @@ Redroid ─(internal Docker network)→ relay: ADB server / scrcpy stream mux :5
 ```
 
 - `connector.py`: A Tkinter desktop application that opens a Cloudflare Access TCP tunnel, then runs ADB and scrcpy.
-- `redroid/`: Builds the Redroid 12 image with MindTheGapps (Play Store) and libndk_translation (ARM apps on x86_64).
+- `redroid/`: Builds the Redroid 12 image with MindTheGapps (Play Store). The base image's libndk_translation runs arm64 apps on x86_64.
 - `relay/`, `relay.py`: A sidecar that keeps its ADB server connected to Redroid and multiplexes that ADB server and the scrcpy stream through port 5555.
 - `compose.yml`: Two instances of each by default (`redroid-1` + `relay-1`, `redroid-2` + `relay-2`).
 
@@ -59,7 +59,7 @@ On the server, run:
 docker compose up -d --build
 ```
 
-The first build downloads the Redroid base image (~1 GB) and the GApps/libndk archives (SHA256-verified). The first boot takes about 1–2 minutes, later boots about 30 seconds. To start only the first instance, run `docker compose up -d --build redroid-1 relay-1`.
+The first build downloads the Redroid base image (~1 GB) and the MindTheGapps archive (SHA256-verified). The first boot takes about 1–2 minutes, later boots about 30 seconds. To start only the first instance, run `docker compose up -d --build redroid-1 relay-1`.
 
 Each instance has two containers:
 
@@ -130,9 +130,9 @@ These replace the `Android emulator is ready.` message of the earlier Android Em
 
 ### Notes on the image
 
-- **Android version: 12.** `redroid-script` installs libndk only for Android 11 and 12 (its `-n` option is limited to `11.0.0`, `12.0.0` and `12.0.0_64only`); MindTheGapps supports 12 through 15. Android 12 is the newest version that supports both. The base image is pinned to `redroid/redroid:12.0.0-240527` (the current `12.0.0-latest`).
-- **ARM translation.** The official image includes only 64-bit libndk. The build adds the libndk_translation prebuilt used by `redroid-script`, which also includes 32-bit ARM (`armeabi-v7a`). Both 32-bit and 64-bit ARM binaries were tested.
-- **arm64 hosts.** The build detects the architecture: on arm64 it adds the arm64 MindTheGapps and skips libndk (ARM apps run natively). The relay uses Ubuntu's `adb` package there, because Google's platform-tools are x86_64-only. Only x86_64 has been tested.
+- **Android version: 12.** It is the newest version for which `redroid-script` supports both MindTheGapps and libndk (its `-n` option is limited to `11.0.0`, `12.0.0` and `12.0.0_64only`), and its official image ships a working arm64 libndk_translation. The base image is pinned to `redroid/redroid:12.0.0-240527` (the current `12.0.0-latest`).
+- **ARM translation: arm64 only.** The build uses the libndk_translation that ships in the official image, which translates arm64 (`arm64-v8a`) only. Apps that ship only 32-bit ARM (`armeabi-v7a`) libraries do not run. Do not add `redroid-script`'s libndk prebuilt (`-n`): on Android 12 it replaces the image's libraries, and arm64 apps then crash at startup in `ndk_translation::AppProcessPostInit()` (tested with Grow Castle).
+- **arm64 hosts.** The build detects the architecture: on arm64 it adds the arm64 MindTheGapps, and ARM apps run natively. The relay uses Ubuntu's `adb` package there, because Google's platform-tools are x86_64-only. Only x86_64 has been tested.
 - **Codec2.** Redroid disables Codec2 (`debug.stagefright.ccodec=0`), which leaves no Opus encoder. scrcpy captures Opus audio by default, so without Codec2 the session fails. The image re-enables Codec2 with `/system/etc/init/scrcpy-anywhere.rc`.
 - The image skips Google's setup wizard (`ro.setupwizard.mode=DISABLED`), as `redroid-script` does for MindTheGapps.
 
