@@ -1,0 +1,2 @@
+on init
+    setprop debug.stagefright.ccodec ${ro.boot.scrcpy_ccodec:-1}
