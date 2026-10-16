@@ -17,7 +17,7 @@ RUN set -eu; \
     mkdir -p /out/gapps; \
     unzip -q /tmp/mtg.zip 'system/*' -d /out/gapps; \
     find /out/gapps -type d -exec chmod 755 {} +; \
-    find /out/gapps -type f -exec chmod 644 {} +
+    find /out/gapps -type f -exec chmod 644 {} +s
 
 FROM ${REDROID_BASE}
 COPY --from=fetch /out/gapps/ /
